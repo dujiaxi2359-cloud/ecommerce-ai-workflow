@@ -1,0 +1,33 @@
+{
+  "name": "ai-image-workflow",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "node scripts/start-lan.js",
+    "start:lan": "node scripts/start-lan.js",
+    "start:keepalive": "node scripts/keep-alive.js",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "lucide-react": "latest",
+    "next": "latest",
+    "openai": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "undici": "^8.2.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "autoprefixer": "^10.4.20",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "latest"
+  }
+}
