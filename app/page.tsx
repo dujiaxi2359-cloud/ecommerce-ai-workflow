@@ -88,7 +88,7 @@ type ServerLogEntry = {
 };
 
 const historyKey = "ecommerce-image-workflow-history-v2";
-const showWorkflowInternals = false;
+const showWorkflowInternals = true;
 const hiddenPromptText = "工作流内部提示词已隐藏。";
 
 function withPlatform(value: string, platform: EcommercePlatformId) {
