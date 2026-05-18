@@ -21,14 +21,17 @@ export type ImageGenerationResult = {
   warning?: string;
 };
 
-const openai = createOpenAIClient(300_000);
-const azureOpenAI = hasAzureImageConfig()
-  ? createAzureOpenAIClient(300_000)
-  : null;
-
 type ImageGenerationClients = {
   openai?: OpenAI;
 };
+
+function getDefaultOpenAIClient() {
+  return createOpenAIClient(300_000);
+}
+
+function getDefaultAzureOpenAIClient() {
+  return hasAzureImageConfig() ? createAzureOpenAIClient(300_000) : null;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,6 +146,7 @@ async function generateAzureImage({
   quality: ImageQuality;
   count: number;
 }) {
+  const azureOpenAI = getDefaultAzureOpenAIClient();
   if (!azureOpenAI) {
     throw new Error("Azure OpenAI is not configured.");
   }
@@ -181,7 +185,7 @@ async function generateOpenAIImage({
   size,
   quality,
   count,
-  client = openai,
+  client = getDefaultOpenAIClient(),
 }: {
   prompt: string;
   size: ImageSize;
@@ -258,6 +262,7 @@ export async function generateImageWithReferences({
   clients?: ImageGenerationClients;
 }): Promise<ImageGenerationResult> {
   if (!clients?.openai && hasAzureImageConfig()) {
+    const azureOpenAI = getDefaultAzureOpenAIClient();
     if (!azureOpenAI) {
       throw new Error("Azure OpenAI is not configured.");
     }
@@ -336,7 +341,7 @@ export async function generateImageWithReferences({
   );
 
   const result = await withImageApiRetry("openai.edit", () =>
-    (clients?.openai || openai).images.edit({
+    (clients?.openai || getDefaultOpenAIClient()).images.edit({
       model: imageModel,
       prompt,
       image: inputFiles,
