@@ -3,8 +3,6 @@ import { createOpenAIClient } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
-const openai = createOpenAIClient(60_000);
-
 export async function POST(request: Request) {
   let prompt = "";
 
@@ -23,6 +21,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ prompt: createLocalOptimizedPrompt(prompt) });
     }
 
+    const openai = createOpenAIClient(60_000);
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
       temperature: 0.7,
