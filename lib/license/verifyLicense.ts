@@ -1,6 +1,11 @@
 import { builtInLicenseCodes, licensePlans } from "@/lib/license/licensePlans";
 import type { LicensePlanId, LicenseStatus } from "@/lib/license/licenseTypes";
 
+type LicenseRecord = {
+  planId: LicensePlanId;
+  expiresAt?: string;
+};
+
 function normalizeLicenseCode(code: string) {
   return code
     .trim()
@@ -9,61 +14,93 @@ function normalizeLicenseCode(code: string) {
     .toUpperCase();
 }
 
+function normalizeDate(value?: string) {
+  const trimmed = value?.trim();
+  if (trimmed && /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return `${trimmed}T23:59:59+08:00`;
+  }
+  return trimmed || undefined;
+}
+
+function isExpired(expiresAt?: string) {
+  if (!expiresAt) return false;
+  const expiresAtMs = Date.parse(expiresAt);
+  if (Number.isNaN(expiresAtMs)) return false;
+  return Date.now() > expiresAtMs;
+}
+
 function parseEnvCodes() {
   return (process.env.COMMERCE_AI_LICENSE_CODES || "")
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .reduce<Record<string, LicensePlanId>>((acc, entry) => {
-      const [code, plan = "pro"] = entry.split(":").map((item) => item.trim());
+    .reduce<Record<string, LicenseRecord>>((acc, entry) => {
+      const [code = "", plan = "pro", ...expiresAtParts] = entry.split(":").map((item) => item.trim());
+      const expiresAt = expiresAtParts.join(":");
       const normalizedCode = normalizeLicenseCode(code);
       if (normalizedCode && plan in licensePlans) {
-        acc[normalizedCode] = plan as LicensePlanId;
+        acc[normalizedCode] = {
+          planId: plan as LicensePlanId,
+          expiresAt: normalizeDate(expiresAt),
+        };
       }
       return acc;
     }, {});
 }
 
-const normalizedBuiltInCodes = Object.entries(builtInLicenseCodes).reduce<Record<string, LicensePlanId>>(
-  (acc, [code, plan]) => {
-    acc[normalizeLicenseCode(code)] = plan;
+const normalizedBuiltInCodes = Object.entries(builtInLicenseCodes).reduce<Record<string, LicenseRecord>>(
+  (acc, [code, planId]) => {
+    acc[normalizeLicenseCode(code)] = { planId };
     return acc;
   },
   {},
 );
 
-const licenseAliases: Record<string, LicensePlanId> = {
-  TRIAL: "trial",
-  BASIC: "basic",
-  PRO: "pro",
-  STUDIO: "studio",
-  AI2026: "studio",
-  AIGC2026: "studio",
+const licenseAliases: Record<string, LicenseRecord> = {
+  TRIAL: { planId: "trial" },
+  BASIC: { planId: "basic" },
+  PRO: { planId: "pro" },
+  STUDIO: { planId: "studio" },
+  AI2026: { planId: "studio" },
+  AIGC2026: { planId: "studio" },
 };
 
 export function verifyLicense(code: string): LicenseStatus {
   const normalized = normalizeLicenseCode(code);
-  const planId = {
+  const license = {
     ...normalizedBuiltInCodes,
     ...licenseAliases,
     ...parseEnvCodes(),
   }[normalized];
 
-  if (!planId) {
+  if (!license) {
     return {
       valid: false,
       code: normalized,
       features: [],
-      message: "授权码无效，请检查后重试。",
+      message: "Invalid license code. Please check and try again.",
     };
   }
 
-  const plan = licensePlans[planId];
+  if (isExpired(license.expiresAt)) {
+    return {
+      valid: false,
+      code: normalized,
+      features: [],
+      expiresAt: license.expiresAt,
+      message: "This license code has expired.",
+    };
+  }
+
+  const plan = licensePlans[license.planId];
   return {
     valid: true,
     code: normalized,
-    planId,
+    planId: license.planId,
     features: plan.features,
-    message: `已激活 ${plan.name} 权限。`,
+    expiresAt: license.expiresAt,
+    message: license.expiresAt
+      ? `Activated ${plan.name}. Expires at ${license.expiresAt}.`
+      : `Activated ${plan.name}.`,
   };
 }

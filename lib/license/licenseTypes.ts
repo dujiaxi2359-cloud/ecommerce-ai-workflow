@@ -24,5 +24,6 @@ export type LicenseStatus = {
   code: string;
   planId?: LicensePlanId;
   features: FeatureKey[];
+  expiresAt?: string;
   message?: string;
 };
