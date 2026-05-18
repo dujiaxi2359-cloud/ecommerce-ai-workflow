@@ -62,7 +62,7 @@ export function createOpenAIClientFromRequest(
 ) {
   const apiKey = config.apiKey?.trim() || "";
   if (!apiKey) {
-    throw new Error("请先填写你的 OpenAI 或 Azure OpenAI API Key。");
+    throw new Error("Please enter your OpenAI or Azure OpenAI API key first.");
   }
 
   const azureFromBaseURL = parseAzureConnection(config.baseURL);
@@ -84,7 +84,7 @@ export function createOpenAIClientFromRequest(
     }
 
     throw new Error(
-      "检测到你填写的是 Azure OpenAI 密钥，但服务器还没有配置 AZURE_OPENAI_ENDPOINT。请先在服务器 .env.local 配置 Azure 终结点和部署名。",
+      "Azure OpenAI key detected, but AZURE_OPENAI_ENDPOINT is not configured on the server. Configure AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT in .env.local.",
     );
   }
 

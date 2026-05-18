@@ -917,10 +917,30 @@ export default function Home() {
       formData.append("__historyMeta", JSON.stringify(historyMeta));
 
       const response = await fetch(endpoint, { method: "POST", body: formData });
-      const payload = await response.json();
+      const responseText = await response.text();
+      let payload: {
+        error?: string;
+        images?: GeneratedImage[];
+        finalPrompt?: string;
+        durationMs?: number;
+        warning?: string;
+        historyItem?: HistoryItem;
+        createdAt?: string;
+      } = {};
+
+      try {
+        payload = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        const shortText = responseText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 180);
+        throw new Error(
+          shortText
+            ? `Backend returned non-JSON content: ${shortText}`
+            : "Backend returned no valid content. Check PM2 logs and retry.",
+        );
+      }
 
       if (!response.ok) {
-        throw new Error(payload.error || "生成失败，请稍后重试。");
+        throw new Error(payload.error || "Generation failed. Please retry later.");
       }
 
       setImages(payload.images || []);
