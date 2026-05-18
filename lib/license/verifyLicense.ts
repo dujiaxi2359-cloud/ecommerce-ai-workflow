@@ -1,6 +1,14 @@
 import { builtInLicenseCodes, licensePlans } from "@/lib/license/licensePlans";
 import type { LicensePlanId, LicenseStatus } from "@/lib/license/licenseTypes";
 
+function normalizeLicenseCode(code: string) {
+  return code
+    .trim()
+    .replace(/[－—–]/g, "-")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+
 function parseEnvCodes() {
   return (process.env.COMMERCE_AI_LICENSE_CODES || "")
     .split(",")
@@ -16,13 +24,13 @@ function parseEnvCodes() {
     }, {});
 }
 
-function normalizeLicenseCode(code: string) {
-  return code
-    .trim()
-    .replace(/[－—–]/g, "-")
-    .replace(/\s+/g, "")
-    .toUpperCase();
-}
+const normalizedBuiltInCodes = Object.entries(builtInLicenseCodes).reduce<Record<string, LicensePlanId>>(
+  (acc, [code, plan]) => {
+    acc[normalizeLicenseCode(code)] = plan;
+    return acc;
+  },
+  {},
+);
 
 const licenseAliases: Record<string, LicensePlanId> = {
   TRIAL: "trial",
@@ -36,7 +44,7 @@ const licenseAliases: Record<string, LicensePlanId> = {
 export function verifyLicense(code: string): LicenseStatus {
   const normalized = normalizeLicenseCode(code);
   const planId = {
-    ...builtInLicenseCodes,
+    ...normalizedBuiltInCodes,
     ...licenseAliases,
     ...parseEnvCodes(),
   }[normalized];
