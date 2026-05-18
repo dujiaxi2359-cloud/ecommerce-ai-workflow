@@ -8,14 +8,38 @@ function parseEnvCodes() {
     .filter(Boolean)
     .reduce<Record<string, LicensePlanId>>((acc, entry) => {
       const [code, plan = "pro"] = entry.split(":").map((item) => item.trim());
-      if (code && plan in licensePlans) acc[code] = plan as LicensePlanId;
+      const normalizedCode = normalizeLicenseCode(code);
+      if (normalizedCode && plan in licensePlans) {
+        acc[normalizedCode] = plan as LicensePlanId;
+      }
       return acc;
     }, {});
 }
 
+function normalizeLicenseCode(code: string) {
+  return code
+    .trim()
+    .replace(/[－—–]/g, "-")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+
+const licenseAliases: Record<string, LicensePlanId> = {
+  TRIAL: "trial",
+  BASIC: "basic",
+  PRO: "pro",
+  STUDIO: "studio",
+  AI2026: "studio",
+  AIGC2026: "studio",
+};
+
 export function verifyLicense(code: string): LicenseStatus {
-  const normalized = code.trim();
-  const planId = { ...builtInLicenseCodes, ...parseEnvCodes() }[normalized];
+  const normalized = normalizeLicenseCode(code);
+  const planId = {
+    ...builtInLicenseCodes,
+    ...licenseAliases,
+    ...parseEnvCodes(),
+  }[normalized];
 
   if (!planId) {
     return {
