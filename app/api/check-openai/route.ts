@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { openAIBaseURL, hasAzureImageConfig, azureOpenAIEndpoint } from "@/lib/openai";
+import {
+  azureOpenAIEndpoint,
+  hasAzureImageConfig,
+  openAIBaseURL,
+} from "@/lib/openai";
 
 export const runtime = "nodejs";
 
@@ -15,12 +19,22 @@ function classifyError(error: unknown) {
   return message;
 }
 
+function looksLikeOpenAIKey(apiKey: string) {
+  return /^sk-/i.test(apiKey.trim());
+}
+
+function cleanOptionalBaseURL(value?: string) {
+  const trimmed = value?.trim() || "";
+  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return "";
+  return trimmed.replace(/\/$/, "");
+}
+
 export async function GET() {
   if (hasAzureImageConfig()) {
     return NextResponse.json({
       ok: true,
       type: "azure",
-      message: "连接成功：当前使用 Azure OpenAI 图片部署。",
+      message: "连接成功：服务器已配置 Azure OpenAI 图片部署。",
       baseURL: "azure",
       endpoint: azureOpenAIEndpoint,
     });
@@ -69,14 +83,37 @@ export async function POST(request: Request) {
     baseURL?: string;
   };
   const apiKey = body.apiKey?.trim() || "";
-  const baseURL = (body.baseURL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
+  const customBaseURL = cleanOptionalBaseURL(body.baseURL);
 
   if (!apiKey) {
     return NextResponse.json(
-      { ok: false, error: "API Key 缺失：请先填写你自己的 OpenAI API Key。" },
+      { ok: false, error: "API Key 缺失：请先填写你的 OpenAI 或 Azure OpenAI API Key。" },
       { status: 400 },
     );
   }
+
+  if (!looksLikeOpenAIKey(apiKey) && hasAzureImageConfig()) {
+    return NextResponse.json({
+      ok: true,
+      type: "azure",
+      message: "已识别为 Azure OpenAI 密钥，服务器 Azure 图片部署配置可用。",
+      baseURL: "azure",
+      endpoint: azureOpenAIEndpoint,
+    });
+  }
+
+  if (!looksLikeOpenAIKey(apiKey) && !customBaseURL) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "检测到这不是普通 OpenAI sk- 密钥。若这是 Azure OpenAI 密钥，请先在服务器配置 AZURE_OPENAI_ENDPOINT 和 AZURE_OPENAI_DEPLOYMENT。",
+      },
+      { status: 400 },
+    );
+  }
+
+  const baseURL = customBaseURL || "https://api.openai.com/v1";
 
   try {
     const controller = new AbortController();

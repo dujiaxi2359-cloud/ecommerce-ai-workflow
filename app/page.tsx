@@ -1558,34 +1558,38 @@ function AccessControlPanel({
             className="min-w-0 flex-1 border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
             value={licenseCode}
             onChange={(event) => setLicenseCode(event.target.value)}
-            placeholder="输入授权码，例如 PRO-2026"
+            placeholder="输入授权码，例如 STUDIO-2026"
           />
           <button className="border border-line bg-ink px-3 py-2 text-sm text-white" onClick={activateLicense}>
             激活
           </button>
         </div>
         <p className={`mt-2 text-xs ${licenseStatus.valid ? "text-green-700" : "text-neutral-500"}`}>
-          {licenseStatus.valid
-            ? `${licenseStatus.planId?.toUpperCase()} 已激活`
-            : "当前未激活授权码"}
+          {licenseStatus.valid ? `${licenseStatus.planId?.toUpperCase()} 已激活` : "当前未激活授权码"}
         </p>
       </div>
 
       <div>
-        <p className="label">客户 OpenAI API Key</p>
+        <p className="label">API 密钥</p>
         <input
           className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
           type="password"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder="sk-... 只保存在本机浏览器"
+          placeholder="粘贴 OpenAI sk-... 或 Azure OpenAI 密钥，只保存在本机浏览器"
         />
-        <input
-          className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
-          value={baseURL}
-          onChange={(event) => setBaseURL(event.target.value)}
-          placeholder="OPENAI_BASE_URL，可留空"
-        />
+        <p className="mt-1 text-xs text-neutral-500">
+          系统会自动识别 OpenAI / Azure OpenAI。正常只需要填写这一项。
+        </p>
+        <details className="mt-2 text-xs text-neutral-600">
+          <summary className="cursor-pointer select-none">高级选项：自定义 OPENAI_BASE_URL</summary>
+          <input
+            className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+            value={baseURL}
+            onChange={(event) => setBaseURL(event.target.value)}
+            placeholder="可留空；仅普通 OpenAI 代理或完整 Azure 终结点需要填写"
+          />
+        </details>
         <div className="mt-2 flex items-center justify-between gap-2">
           <span className="text-xs text-neutral-500">
             {apiKey ? `已填写：${maskApiKey(apiKey)}` : "平台不会保存你的完整 Key"}
@@ -1603,7 +1607,6 @@ function AccessControlPanel({
     </div>
   );
 }
-
 function TextWorkflow(props: {
   prompt: string;
   setPrompt: (value: string) => void;
