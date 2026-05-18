@@ -3,6 +3,10 @@ import { generateImageWithReferences } from "@/lib/image-generation";
 import { buildDetailImagePrompt } from "@/lib/promptBuilders";
 import { ratioToSize } from "@/lib/templates";
 import { publicPrompt } from "@/lib/workflow-privacy";
+import {
+  isWorkflowAuthResponse,
+  withWorkflowAuthFromFormData,
+} from "@/lib/server/withWorkflowAuth";
 import { defaultProductProtection } from "@/types/workflow";
 import type { DetailBlueprintItem } from "@/types/detail";
 import type { ImageQuality, Ratio } from "@/lib/workflow";
@@ -28,6 +32,9 @@ function buildPrivateBlueprintPrompt(blueprint: DetailBlueprintItem) {
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
+    const auth = await withWorkflowAuthFromFormData(formData, "detail-batch");
+    if (isWorkflowAuthResponse(auth)) return auth;
+
     const product = formData.get("productImage");
     if (!(product instanceof File) || product.size === 0) {
       return NextResponse.json({ error: "请上传产品主图。" }, { status: 400 });
@@ -58,6 +65,7 @@ export async function POST(request: Request) {
         size: ratioToSize[ratio],
         quality,
         count: 1,
+        clients: { openai: auth.openai },
       });
       outputs.push({ blueprint, prompt: publicPrompt(), images: result.images });
     }

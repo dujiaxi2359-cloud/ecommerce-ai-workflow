@@ -83,6 +83,8 @@ npm install
 
 复制 `.env.example` 为 `.env.local`，然后填写密钥。
 
+当前工具权限版本推荐客户在页面里填写自己的 OpenAI API Key。该 Key 默认只保存到客户浏览器 localStorage，后端只在单次生图请求中使用，不会落库，也不会打印完整 Key。
+
 OpenAI 官方或兼容网关：
 
 ```bash
@@ -101,6 +103,33 @@ DEPLOYMENT_NAME=gpt-image-2
 ```
 
 如果同时配置 Azure 和 OpenAI，本项目图片生成优先使用 Azure，OpenAI 官方或兼容网关走独立路径。
+
+## 工具权限版本
+
+当前商业模式是“授权码 + 客户自带 API Key”：
+
+- 客户打开网站后输入授权码，例如 `TRIAL-2026`、`BASIC-2026`、`PRO-2026`、`STUDIO-2026`。
+- 客户在页面中填写自己的 OpenAI API Key 和可选 Base URL。
+- 客户自己承担 OpenAI API 消耗，平台不使用你的平台 API Key 代付。
+- 当前不做注册登录、在线支付、复杂后台和额度扣费。
+
+权限配置集中在 `lib/license/licensePlans.ts`。以后新增功能时，只需要增加 feature key 和套餐配置，不需要重写工作流页面。
+
+## 架构模块
+
+项目已将后续 SaaS 升级需要的基础模块拆开：
+
+- `lib/license`：授权码、套餐功能、feature access。
+- `lib/apiKey`：客户 API Key 保存、脱敏、请求级 OpenAI client。
+- `lib/workflows`：工作流注册表、工作流权限、成本预留。
+- `lib/server/withWorkflowAuth.ts`：服务端生图 API 统一鉴权入口。
+- `lib/auth`：账号系统预留，当前是 license-only mode。
+- `lib/billing`：支付套餐和订单类型预留。
+- `lib/credits`：额度系统预留，当前默认通过。
+- `lib/history`：历史记录 provider，当前使用 localStorage/共享历史。
+- `lib/storage`：图片存储 provider，未来可接 Supabase Storage、Cloudflare R2、S3。
+
+生图接口会统一校验授权码、工作流权限和客户 API Key，不会把 API Key 暴露到前端源码或服务端日志。
 
 ## 启动
 
@@ -168,3 +197,19 @@ GET /api/openai-status
 - `Invalid size`：图片接口要求宽高能被 16 整除，项目会自动把不合规尺寸修正到最近可用尺寸。
 - 参考图生成不像产品：必须使用支持图片编辑/参考图输入的服务端接口；只有纯文生图接口无法保证产品一致。
 - 同事没有历史记录：历史记录会同步到服务端 `data/history`，但每台电脑浏览器 localStorage 不共享；同事需要访问同一个运行中的服务端。
+
+## 后续升级路线
+
+当前版本：授权码 + 客户自带 API Key，适合工具权限售卖和私有小范围部署。
+
+下一阶段：接入账号登录，把授权码绑定到 `userId`，替换 `lib/auth/currentUser.ts` 和 `lib/license/verifyLicense.ts` 即可。
+
+再下一阶段：接入支付套餐，把支付结果转成 license 或 user plan，主要扩展 `lib/billing` 和 `lib/license/licensePlans.ts`。
+
+正式 SaaS 阶段：增加用户中心、管理后台、云端历史、云端图片存储，替换 `lib/history/historyProvider.ts` 和 `lib/storage/storageProvider.ts`。
+
+团队版阶段：增加团队空间、共享素材、模板市场和协作权限，在 `lib/workflows` 和 `lib/license` 中扩展 feature key。
+
+私有部署版：为客户部署独立版本，使用客户自己的环境变量、授权码和存储服务。
+
+核心原则：后续升级账号、支付、额度、云存储时，不重写已有六个工作流，只替换对应模块实现。

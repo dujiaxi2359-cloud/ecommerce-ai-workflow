@@ -4,6 +4,10 @@ import { buildMimicPrompt } from "@/lib/prompt-builders";
 import { addServerLog } from "@/lib/server-logs";
 import { saveSharedHistory, type SharedHistoryItem } from "@/lib/server-history";
 import { publicPrompt, redactHistoryPrompt } from "@/lib/workflow-privacy";
+import {
+  isWorkflowAuthResponse,
+  withWorkflowAuthFromFormData,
+} from "@/lib/server/withWorkflowAuth";
 import { ratioToSize, type MimicDimension, type MimicStrength, type MimicType } from "@/lib/templates";
 import type { ImageQuality, Ratio } from "@/lib/workflow";
 
@@ -28,6 +32,9 @@ export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
     const formData = await request.formData();
+    const auth = await withWorkflowAuthFromFormData(formData, "reference-mimic");
+    if (isWorkflowAuthResponse(auth)) return auth;
+
     const referenceImage = formData.get("referenceImage");
     const productImage = formData.get("productImage");
 
@@ -75,6 +82,7 @@ export async function POST(request: Request) {
       size: ratioToSize[ratio],
       quality,
       count,
+      clients: { openai: auth.openai },
     });
 
     const createdAt = new Date().toISOString();

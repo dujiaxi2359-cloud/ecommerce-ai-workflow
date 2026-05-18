@@ -57,8 +57,39 @@ import {
   type Ratio,
   type StyleKey,
 } from "@/lib/workflow";
+import { loadUserApiKey, saveUserApiKey, clearUserApiKey } from "@/lib/apiKey/userApiKey";
+import { maskApiKey } from "@/lib/apiKey/maskApiKey";
+import { hasFeatureAccess } from "@/lib/license/featureAccess";
+import { loadLicenseCode, saveLicenseCode } from "@/lib/license/licenseStorage";
+import { verifyLicense } from "@/lib/license/verifyLicense";
+import type { FeatureKey, LicenseStatus } from "@/lib/license/licenseTypes";
+import { workflowRegistry } from "@/lib/workflows/workflowRegistry";
+import type { WorkflowId } from "@/lib/workflows/workflowTypes";
 
 type TabKey = "text" | "mimic" | "product" | "variant" | "detail" | "poster";
+
+const workflowTabMap: Record<WorkflowId, TabKey> = {
+  "text-image": "text",
+  "reference-mimic": "mimic",
+  "product-workflow": "product",
+  "product-variant": "variant",
+  "detail-workflow": "detail",
+  "poster-workflow": "poster",
+};
+
+const tabFeatureMap: Record<TabKey, FeatureKey> = {
+  text: "text-image",
+  mimic: "reference-mimic",
+  product: "product-workflow",
+  variant: "product-variant",
+  detail: "detail-batch",
+  poster: "poster",
+};
+
+const workflowTabItems = workflowRegistry.map((workflow) => ({
+  ...workflow,
+  tab: workflowTabMap[workflow.id],
+}));
 
 type GeneratedImage = {
   id: string;
@@ -114,6 +145,12 @@ export default function Home() {
   const [logs, setLogs] = useState<ServerLogEntry[]>([]);
   const [showLogs, setShowLogs] = useState(true);
   const [downloadingHistoryId, setDownloadingHistoryId] = useState("");
+  const [licenseCode, setLicenseCode] = useState("");
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>(() =>
+    verifyLicense(""),
+  );
+  const [userApiKey, setUserApiKey] = useState("");
+  const [userBaseURL, setUserBaseURL] = useState("");
 
   const [textPrompt, setTextPrompt] = useState("");
   const [textStyle, setTextStyle] = useState<StyleKey>("minimalEcommerce");
@@ -330,6 +367,12 @@ export default function Home() {
 
   useEffect(() => {
     setHasMounted(true);
+    const storedLicense = loadLicenseCode();
+    const storedApiKey = loadUserApiKey();
+    setLicenseCode(storedLicense);
+    setLicenseStatus(verifyLicense(storedLicense));
+    setUserApiKey(storedApiKey.apiKey);
+    setUserBaseURL(storedApiKey.baseURL || "");
   }, []);
 
   useEffect(() => {
@@ -413,12 +456,16 @@ export default function Home() {
     setStatus("");
 
     try {
-      const response = await fetch("/api/openai-status");
+      const response = await fetch("/api/check-openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: userApiKey, baseURL: userBaseURL }),
+      });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
         throw new Error(payload.error || "连接检测失败");
       }
-      setStatus(`图片服务连接正常：${payload.model}`);
+      setStatus(payload.message || "图片服务连接正常。");
     } catch (statusError) {
       setError(
         statusError instanceof Error
@@ -433,6 +480,50 @@ export default function Home() {
   async function clearLogs() {
     await fetch("/api/logs", { method: "DELETE" });
     setLogs([]);
+  }
+
+  function activateLicense() {
+    const next = verifyLicense(licenseCode);
+    setLicenseStatus(next);
+    if (next.valid) {
+      saveLicenseCode(licenseCode);
+      setStatus(next.message || "授权已激活。");
+      setError("");
+    } else {
+      setError(next.message || "授权码无效，请检查后重试。");
+    }
+  }
+
+  function saveApiKeyConfig() {
+    if (!userApiKey.trim()) {
+      setError("请填写你自己的 OpenAI API Key。");
+      return;
+    }
+
+    saveUserApiKey({ apiKey: userApiKey, baseURL: userBaseURL });
+    setStatus(`API Key 已保存到本机浏览器：${maskApiKey(userApiKey)}`);
+    setError("");
+  }
+
+  function clearApiKeyConfig() {
+    clearUserApiKey();
+    setUserApiKey("");
+    setUserBaseURL("");
+    setStatus("本机浏览器中的 API Key 已清除。");
+  }
+
+  function ensureAccess(featureKey = tabFeatureMap[activeTab], requireApiKey = true) {
+    if (!licenseStatus.valid || !hasFeatureAccess(licenseStatus, featureKey)) {
+      setError("请先输入有效授权码，或升级到包含该工作流权限的套餐。");
+      return false;
+    }
+
+    if (requireApiKey && !userApiKey.trim()) {
+      setError("请先填写客户自己的 OpenAI API Key。");
+      return false;
+    }
+
+    return true;
   }
 
   async function optimizeTextPrompt() {
@@ -638,11 +729,20 @@ export default function Home() {
       return;
     }
 
+    if (!ensureAccess("detail-single", false)) {
+      return;
+    }
+
     setError("");
     const response = await fetch("/api/detail-blueprint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(detailInput()),
+      body: JSON.stringify({
+        ...detailInput(),
+        licenseCode,
+        apiKey: userApiKey,
+        baseURL: userBaseURL,
+      }),
     });
     const payload = await response.json();
     if (!response.ok) {
@@ -793,6 +893,10 @@ export default function Home() {
     formData: FormData,
     meta: Omit<HistoryItem, "id" | "createdAt" | "finalPrompt">,
   ) {
+    if (!ensureAccess()) {
+      return;
+    }
+
     const startedAt = Date.now();
     setError("");
     setStatus("");
@@ -807,6 +911,9 @@ export default function Home() {
         id: createId("history"),
         ...meta,
       };
+      formData.append("licenseCode", licenseCode);
+      formData.append("apiKey", userApiKey);
+      formData.append("baseURL", userBaseURL);
       formData.append("__historyMeta", JSON.stringify(historyMeta));
 
       const response = await fetch(endpoint, { method: "POST", body: formData });
@@ -958,25 +1065,36 @@ export default function Home() {
 
       <section className="grid gap-5 py-5 xl:grid-cols-[430px_minmax(0,1fr)_360px]">
         <aside className="border border-line bg-white p-4 shadow-soft">
+          <AccessControlPanel
+            licenseCode={licenseCode}
+            setLicenseCode={setLicenseCode}
+            licenseStatus={licenseStatus}
+            activateLicense={activateLicense}
+            apiKey={userApiKey}
+            setApiKey={setUserApiKey}
+            baseURL={userBaseURL}
+            setBaseURL={setUserBaseURL}
+            saveApiKey={saveApiKeyConfig}
+            clearApiKey={clearApiKeyConfig}
+          />
+
           <div className="grid grid-cols-2 gap-1 border border-line bg-paper p-1">
-            {[
-              ["text", "文本生图"],
-              ["mimic", "参考图模仿生图"],
-              ["product", "产品图工作流"],
-              ["variant", "产品风格变体"],
-              ["detail", "详情图工作流"],
-              ["poster", "海报工作流"],
-            ].map(([value, label]) => (
+            {workflowTabItems.map((workflow) => {
+              const locked = !hasFeatureAccess(licenseStatus, workflow.featureKey);
+              return (
               <button
-                key={value}
+                key={workflow.id}
+                title={locked ? "当前授权未开放该工作流" : workflow.description}
                 className={`px-3 py-2 text-sm font-medium transition ${
-                  activeTab === value ? "bg-ink text-white" : "text-neutral-600"
+                  activeTab === workflow.tab ? "bg-ink text-white" : "text-neutral-600"
                 }`}
-                onClick={() => setActiveTab(value as TabKey)}
+                onClick={() => setActiveTab(workflow.tab)}
               >
-                {label}
+                {workflow.name}
+                {locked ? " · 未授权" : ""}
               </button>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-5 space-y-5">
@@ -1405,6 +1523,84 @@ export default function Home() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function AccessControlPanel({
+  licenseCode,
+  setLicenseCode,
+  licenseStatus,
+  activateLicense,
+  apiKey,
+  setApiKey,
+  baseURL,
+  setBaseURL,
+  saveApiKey,
+  clearApiKey,
+}: {
+  licenseCode: string;
+  setLicenseCode: (value: string) => void;
+  licenseStatus: LicenseStatus;
+  activateLicense: () => void;
+  apiKey: string;
+  setApiKey: (value: string) => void;
+  baseURL: string;
+  setBaseURL: (value: string) => void;
+  saveApiKey: () => void;
+  clearApiKey: () => void;
+}) {
+  return (
+    <div className="mb-4 space-y-3 border border-line bg-paper p-3">
+      <div>
+        <p className="label">工具权限</p>
+        <div className="mt-2 flex gap-2">
+          <input
+            className="min-w-0 flex-1 border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+            value={licenseCode}
+            onChange={(event) => setLicenseCode(event.target.value)}
+            placeholder="输入授权码，例如 PRO-2026"
+          />
+          <button className="border border-line bg-ink px-3 py-2 text-sm text-white" onClick={activateLicense}>
+            激活
+          </button>
+        </div>
+        <p className={`mt-2 text-xs ${licenseStatus.valid ? "text-green-700" : "text-neutral-500"}`}>
+          {licenseStatus.valid
+            ? `${licenseStatus.planId?.toUpperCase()} 已激活`
+            : "当前未激活授权码"}
+        </p>
+      </div>
+
+      <div>
+        <p className="label">客户 OpenAI API Key</p>
+        <input
+          className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+          type="password"
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder="sk-... 只保存在本机浏览器"
+        />
+        <input
+          className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+          value={baseURL}
+          onChange={(event) => setBaseURL(event.target.value)}
+          placeholder="OPENAI_BASE_URL，可留空"
+        />
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-xs text-neutral-500">
+            {apiKey ? `已填写：${maskApiKey(apiKey)}` : "平台不会保存你的完整 Key"}
+          </span>
+          <div className="flex gap-2">
+            <button className="border border-line bg-white px-3 py-1.5 text-xs" onClick={clearApiKey}>
+              清除
+            </button>
+            <button className="border border-line bg-white px-3 py-1.5 text-xs" onClick={saveApiKey}>
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

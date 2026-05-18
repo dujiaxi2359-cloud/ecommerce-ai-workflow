@@ -3,6 +3,10 @@ import { generateImage, generateImageWithReferences } from "@/lib/image-generati
 import { buildTextPrompt } from "@/lib/prompt-builders";
 import { addServerLog } from "@/lib/server-logs";
 import { saveSharedHistory, type SharedHistoryItem } from "@/lib/server-history";
+import {
+  isWorkflowAuthResponse,
+  withWorkflowAuthFromFormData,
+} from "@/lib/server/withWorkflowAuth";
 import { publicPrompt, redactHistoryPrompt } from "@/lib/workflow-privacy";
 import { createFallbackImages, type ImageQuality, type ImageSize, type Ratio, type StyleKey } from "@/lib/workflow";
 
@@ -82,6 +86,8 @@ export async function POST(request: Request) {
     const mode = String(formData.get("mode") || "text");
     const reference = formData.get("reference");
     const historyMeta = parseHistoryMeta(formData.get("__historyMeta"));
+    const auth = await withWorkflowAuthFromFormData(formData, "text-image");
+    if (isWorkflowAuthResponse(auth)) return auth;
 
     addServerLog("info", "api.generate-image", "Received image generation request", {
       mode,
@@ -106,8 +112,15 @@ export async function POST(request: Request) {
             size,
             quality,
             count,
+            clients: { openai: auth.openai },
           })
-        : await generateImage({ prompt: finalPrompt, size, quality, count });
+        : await generateImage({
+            prompt: finalPrompt,
+            size,
+            quality,
+            count,
+            clients: { openai: auth.openai },
+          });
 
     const createdAt = new Date().toISOString();
     const historyItem = await saveGeneratedHistory({

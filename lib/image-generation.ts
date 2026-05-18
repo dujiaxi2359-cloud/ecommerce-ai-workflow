@@ -1,4 +1,4 @@
-import { toFile } from "openai";
+import OpenAI, { toFile } from "openai";
 import {
   azureOpenAIDeployment,
   createAzureOpenAIClient,
@@ -25,6 +25,10 @@ const openai = createOpenAIClient(300_000);
 const azureOpenAI = hasAzureImageConfig()
   ? createAzureOpenAIClient(300_000)
   : null;
+
+type ImageGenerationClients = {
+  openai?: OpenAI;
+};
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -177,11 +181,13 @@ async function generateOpenAIImage({
   size,
   quality,
   count,
+  client = openai,
 }: {
   prompt: string;
   size: ImageSize;
   quality: ImageQuality;
   count: number;
+  client?: OpenAI;
 }) {
   const apiSize = normalizeSizeForImageApi(size, quality);
   const startedAt = Date.now();
@@ -195,7 +201,7 @@ async function generateOpenAIImage({
   });
 
   const result = await withImageApiRetry("openai.generate", () =>
-    openai.images.generate({
+    client.images.generate({
       model: imageModel,
       prompt,
       size: apiSize.size,
@@ -217,12 +223,18 @@ export async function generateImage({
   size,
   quality,
   count,
+  clients,
 }: {
   prompt: string;
   size: ImageSize;
   quality: ImageQuality;
   count: number;
+  clients?: ImageGenerationClients;
 }): Promise<ImageGenerationResult> {
+  if (clients?.openai) {
+    return generateOpenAIImage({ prompt, size, quality, count, client: clients.openai });
+  }
+
   if (hasAzureImageConfig()) {
     return generateAzureImage({ prompt, size, quality, count });
   }
@@ -236,14 +248,16 @@ export async function generateImageWithReferences({
   size,
   quality,
   count,
+  clients,
 }: {
   prompt: string;
   images: File[];
   size: ImageSize;
   quality: ImageQuality;
   count: number;
+  clients?: ImageGenerationClients;
 }): Promise<ImageGenerationResult> {
-  if (hasAzureImageConfig()) {
+  if (!clients?.openai && hasAzureImageConfig()) {
     if (!azureOpenAI) {
       throw new Error("Azure OpenAI is not configured.");
     }
@@ -322,7 +336,7 @@ export async function generateImageWithReferences({
   );
 
   const result = await withImageApiRetry("openai.edit", () =>
-    openai.images.edit({
+    (clients?.openai || openai).images.edit({
       model: imageModel,
       prompt,
       image: inputFiles,

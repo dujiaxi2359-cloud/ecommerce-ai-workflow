@@ -62,3 +62,52 @@ export async function GET() {
     );
   }
 }
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    apiKey?: string;
+    baseURL?: string;
+  };
+  const apiKey = body.apiKey?.trim() || "";
+  const baseURL = (body.baseURL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
+
+  if (!apiKey) {
+    return NextResponse.json(
+      { ok: false, error: "API Key 缺失：请先填写你自己的 OpenAI API Key。" },
+      { status: 400 },
+    );
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const response = await fetch(`${baseURL}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: classifyError(`${response.status} ${response.statusText}`),
+          baseURL,
+        },
+        { status: response.status },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      type: "openai",
+      message: "连接成功：当前使用客户自己的 OpenAI API Key。",
+      baseURL,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, error: classifyError(error), baseURL },
+      { status: 500 },
+    );
+  }
+}

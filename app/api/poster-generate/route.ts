@@ -3,6 +3,10 @@ import { generateImageWithReferences } from "@/lib/image-generation";
 import { buildPosterPrompt } from "@/lib/promptBuilders";
 import { platformPrompt, ratioToSize } from "@/lib/templates";
 import { publicPrompt } from "@/lib/workflow-privacy";
+import {
+  isWorkflowAuthResponse,
+  withWorkflowAuthFromFormData,
+} from "@/lib/server/withWorkflowAuth";
 import { defaultProductProtection, type ProductProtectionLevel } from "@/types/workflow";
 import type { ImageQuality, Ratio } from "@/lib/workflow";
 
@@ -11,6 +15,9 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
+    const auth = await withWorkflowAuthFromFormData(formData, "poster");
+    if (isWorkflowAuthResponse(auth)) return auth;
+
     const product = formData.get("productImage");
     if (!(product instanceof File) || product.size === 0) {
       return NextResponse.json({ error: "请上传产品图。" }, { status: 400 });
@@ -40,6 +47,7 @@ export async function POST(request: Request) {
       size: ratioToSize[ratio],
       quality,
       count: 1,
+      clients: { openai: auth.openai },
     });
 
     return NextResponse.json({
