@@ -943,6 +943,7 @@ export default function Home() {
         throw new Error(payload.error || "Generation failed. Please retry later.");
       }
 
+      setError("");
       setImages(payload.images || []);
       setFinalPrompt(
         showWorkflowInternals
@@ -963,6 +964,7 @@ export default function Home() {
         createdAt: payload.createdAt || new Date().toISOString(),
       };
       await persistHistory(historyItem, payload.images || []);
+      setError("");
     } catch (generationError) {
       setError(
         generationError instanceof Error
