@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type OpenAI from "openai";
+import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
 import { createOpenAIClientFromRequest, sanitizeApiKeyError } from "@/lib/apiKey/openaiClientFromRequest";
 import { checkCredits } from "@/lib/credits/checkCredits";
 import { hasFeatureAccess } from "@/lib/license/featureAccess";
@@ -9,14 +10,22 @@ import { verifyLicense } from "@/lib/license/verifyLicense";
 export type WorkflowAuthContext = {
   license: LicenseStatus;
   openai?: OpenAI;
+  apiProvider?: ApiProvider;
   apiKey?: string;
   baseURL?: string;
+  azureEndpoint?: string;
+  azureDeployment?: string;
+  azureApiVersion?: string;
 };
 
 export type WorkflowAuthInput = {
   licenseCode?: string;
+  apiProvider?: ApiProvider;
   apiKey?: string;
   baseURL?: string;
+  azureEndpoint?: string;
+  azureDeployment?: string;
+  azureApiVersion?: string;
   featureKey: FeatureKey;
   requireApiKey?: boolean;
 };
@@ -27,8 +36,12 @@ export function workflowAuthError(message: string, status = 403) {
 
 export async function validateWorkflowAuth({
   licenseCode,
+  apiProvider = "azure",
   apiKey,
   baseURL,
+  azureEndpoint,
+  azureDeployment,
+  azureApiVersion,
   featureKey,
   requireApiKey = true,
 }: WorkflowAuthInput): Promise<WorkflowAuthContext> {
@@ -47,19 +60,35 @@ export async function validateWorkflowAuth({
   }
 
   if (!requireApiKey) {
-    return { license, apiKey: apiKey || "", baseURL: baseURL || "" };
+    return {
+      license,
+      apiProvider,
+      apiKey: apiKey || "",
+      baseURL: baseURL || "",
+      azureEndpoint: azureEndpoint || "",
+      azureDeployment: azureDeployment || "",
+      azureApiVersion: azureApiVersion || "",
+    };
   }
 
   const openai = createOpenAIClientFromRequest({
+    provider: apiProvider,
     apiKey: apiKey || "",
     baseURL: baseURL || "",
+    azureEndpoint: azureEndpoint || "",
+    azureDeployment: azureDeployment || "",
+    azureApiVersion: azureApiVersion || "",
   });
 
   return {
     license,
     openai,
+    apiProvider,
     apiKey: apiKey || "",
     baseURL: baseURL || "",
+    azureEndpoint: azureEndpoint || "",
+    azureDeployment: azureDeployment || "",
+    azureApiVersion: azureApiVersion || "",
   };
 }
 
@@ -72,8 +101,12 @@ export async function withWorkflowAuthFromFormData(
   try {
     return await validateWorkflowAuth({
       licenseCode: String(formData.get("licenseCode") || ""),
+      apiProvider: String(formData.get("apiProvider") || "azure") as ApiProvider,
       apiKey,
       baseURL: String(formData.get("baseURL") || ""),
+      azureEndpoint: String(formData.get("azureEndpoint") || ""),
+      azureDeployment: String(formData.get("azureDeployment") || ""),
+      azureApiVersion: String(formData.get("azureApiVersion") || ""),
       featureKey,
       requireApiKey: options.requireApiKey,
     });
@@ -88,15 +121,27 @@ export async function withWorkflowAuthFromFormData(
 }
 
 export async function withWorkflowAuthFromJson(
-  body: { licenseCode?: string; apiKey?: string; baseURL?: string },
+  body: {
+    licenseCode?: string;
+    apiProvider?: ApiProvider;
+    apiKey?: string;
+    baseURL?: string;
+    azureEndpoint?: string;
+    azureDeployment?: string;
+    azureApiVersion?: string;
+  },
   featureKey: FeatureKey,
   options: { requireApiKey?: boolean } = {},
 ) {
   try {
     return await validateWorkflowAuth({
       licenseCode: body.licenseCode || "",
+      apiProvider: body.apiProvider || "azure",
       apiKey: body.apiKey || "",
       baseURL: body.baseURL || "",
+      azureEndpoint: body.azureEndpoint || "",
+      azureDeployment: body.azureDeployment || "",
+      azureApiVersion: body.azureApiVersion || "",
       featureKey,
       requireApiKey: options.requireApiKey,
     });

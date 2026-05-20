@@ -59,6 +59,7 @@ import {
 } from "@/lib/workflow";
 import { loadUserApiKey, saveUserApiKey, clearUserApiKey } from "@/lib/apiKey/userApiKey";
 import { maskApiKey } from "@/lib/apiKey/maskApiKey";
+import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
 import { hasFeatureAccess } from "@/lib/license/featureAccess";
 import { loadLicenseCode, saveLicenseCode } from "@/lib/license/licenseStorage";
 import type { FeatureKey, LicenseStatus } from "@/lib/license/licenseTypes";
@@ -230,8 +231,12 @@ export default function Home() {
   const [licenseCode, setLicenseCode] = useState("");
   const [licenseStatus, setLicenseStatus] =
     useState<LicenseStatus>(emptyLicenseStatus);
+  const [apiProvider, setApiProvider] = useState<ApiProvider>("azure");
   const [userApiKey, setUserApiKey] = useState("");
   const [userBaseURL, setUserBaseURL] = useState("");
+  const [azureEndpoint, setAzureEndpoint] = useState("");
+  const [azureDeployment, setAzureDeployment] = useState("gpt-image-2");
+  const [azureApiVersion, setAzureApiVersion] = useState("2025-04-01-preview");
 
   const [textPrompt, setTextPrompt] = useState("");
   const [textStyle, setTextStyle] = useState<StyleKey>("minimalEcommerce");
@@ -462,6 +467,10 @@ export default function Home() {
     }
     setUserApiKey(storedApiKey.apiKey);
     setUserBaseURL(storedApiKey.baseURL || "");
+    setApiProvider(storedApiKey.provider || "azure");
+    setAzureEndpoint(storedApiKey.azureEndpoint || "");
+    setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
+    setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
     return () => {
       cancelled = true;
     };
@@ -542,6 +551,28 @@ export default function Home() {
   useFilePreview(posterProduct, setPosterProductPreview, setPosterProductThumb);
   useFilePreview(posterLogo, setPosterLogoPreview, setPosterLogoThumb);
 
+  function apiConfigPayload() {
+    return {
+      provider: apiProvider,
+      apiProvider,
+      apiKey: userApiKey,
+      baseURL: userBaseURL,
+      azureEndpoint,
+      azureDeployment,
+      azureApiVersion,
+    };
+  }
+
+  function appendApiConfig(formData: FormData) {
+    const config = apiConfigPayload();
+    formData.append("apiProvider", config.apiProvider);
+    formData.append("apiKey", config.apiKey);
+    formData.append("baseURL", config.baseURL);
+    formData.append("azureEndpoint", config.azureEndpoint);
+    formData.append("azureDeployment", config.azureDeployment);
+    formData.append("azureApiVersion", config.azureApiVersion);
+  }
+
   async function checkOpenAIStatus() {
     setIsChecking(true);
     setError("");
@@ -551,7 +582,7 @@ export default function Home() {
       const response = await fetch("/api/check-openai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: userApiKey, baseURL: userBaseURL }),
+        body: JSON.stringify(apiConfigPayload()),
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) {
@@ -592,15 +623,29 @@ export default function Home() {
       return;
     }
 
-    saveUserApiKey({ apiKey: userApiKey, baseURL: userBaseURL });
+    if (apiProvider === "azure" && (!azureEndpoint.trim() || !azureDeployment.trim())) {
+      setError("客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。");
+      return;
+    }
+
+    if (apiProvider === "openai" && !userBaseURL.trim()) {
+      setError("客户 OpenAI 模式需要填写 OPENAI_BASE_URL。");
+      return;
+    }
+
+    saveUserApiKey(apiConfigPayload());
     setStatus(`API Key 已保存到本机浏览器：${maskApiKey(userApiKey)}`);
     setError("");
   }
 
   function clearApiKeyConfig() {
     clearUserApiKey();
+    setApiProvider("azure");
     setUserApiKey("");
     setUserBaseURL("");
+    setAzureEndpoint("");
+    setAzureDeployment("gpt-image-2");
+    setAzureApiVersion("2025-04-01-preview");
     setStatus("本机浏览器中的 API Key 已清除。");
   }
 
@@ -612,6 +657,16 @@ export default function Home() {
 
     if (requireApiKey && !userApiKey.trim()) {
       setError("请先填写客户自己的 OpenAI API Key。");
+      return false;
+    }
+
+    if (requireApiKey && apiProvider === "azure" && (!azureEndpoint.trim() || !azureDeployment.trim())) {
+      setError("客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。");
+      return false;
+    }
+
+    if (requireApiKey && apiProvider === "openai" && !userBaseURL.trim()) {
+      setError("客户 OpenAI 模式需要填写 OPENAI_BASE_URL。");
       return false;
     }
 
@@ -832,8 +887,7 @@ export default function Home() {
       body: JSON.stringify({
         ...detailInput(),
         licenseCode,
-        apiKey: userApiKey,
-        baseURL: userBaseURL,
+        ...apiConfigPayload(),
       }),
     });
     const payload = await response.json();
@@ -1004,8 +1058,7 @@ export default function Home() {
         ...meta,
       };
       formData.append("licenseCode", licenseCode);
-      formData.append("apiKey", userApiKey);
-      formData.append("baseURL", userBaseURL);
+      appendApiConfig(formData);
       formData.append("__historyMeta", JSON.stringify(historyMeta));
 
       const response = await fetch(endpoint, { method: "POST", body: formData });
@@ -1179,15 +1232,23 @@ export default function Home() {
 
       <section className="grid gap-5 py-5 xl:grid-cols-[430px_minmax(0,1fr)_360px]">
         <aside className="border border-line bg-white p-4 shadow-soft">
-          <AccessControlPanel
+          <CustomerApiAccessPanel
             licenseCode={licenseCode}
             setLicenseCode={setLicenseCode}
             licenseStatus={licenseStatus}
             activateLicense={activateLicense}
+            apiProvider={apiProvider}
+            setApiProvider={setApiProvider}
             apiKey={userApiKey}
             setApiKey={setUserApiKey}
             baseURL={userBaseURL}
             setBaseURL={setUserBaseURL}
+            azureEndpoint={azureEndpoint}
+            setAzureEndpoint={setAzureEndpoint}
+            azureDeployment={azureDeployment}
+            setAzureDeployment={setAzureDeployment}
+            azureApiVersion={azureApiVersion}
+            setAzureApiVersion={setAzureApiVersion}
             saveApiKey={saveApiKeyConfig}
             clearApiKey={clearApiKeyConfig}
           />
@@ -1640,15 +1701,23 @@ export default function Home() {
   );
 }
 
-function AccessControlPanel({
+function CustomerApiAccessPanel({
   licenseCode,
   setLicenseCode,
   licenseStatus,
   activateLicense,
+  apiProvider,
+  setApiProvider,
   apiKey,
   setApiKey,
   baseURL,
   setBaseURL,
+  azureEndpoint,
+  setAzureEndpoint,
+  azureDeployment,
+  setAzureDeployment,
+  azureApiVersion,
+  setAzureApiVersion,
   saveApiKey,
   clearApiKey,
 }: {
@@ -1656,10 +1725,156 @@ function AccessControlPanel({
   setLicenseCode: (value: string) => void;
   licenseStatus: LicenseStatus;
   activateLicense: () => void | Promise<void>;
+  apiProvider: ApiProvider;
+  setApiProvider: (value: ApiProvider) => void;
   apiKey: string;
   setApiKey: (value: string) => void;
   baseURL: string;
   setBaseURL: (value: string) => void;
+  azureEndpoint: string;
+  setAzureEndpoint: (value: string) => void;
+  azureDeployment: string;
+  setAzureDeployment: (value: string) => void;
+  azureApiVersion: string;
+  setAzureApiVersion: (value: string) => void;
+  saveApiKey: () => void;
+  clearApiKey: () => void;
+}) {
+  return (
+    <div className="mb-4 space-y-3 border border-line bg-paper p-3">
+      <div>
+        <p className="label">工具权限</p>
+        <div className="mt-2 flex gap-2">
+          <input
+            className="min-w-0 flex-1 border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+            value={licenseCode}
+            onChange={(event) => setLicenseCode(event.target.value)}
+            placeholder="输入授权码，例如 STUDIO-2026"
+          />
+          <button className="border border-line bg-ink px-3 py-2 text-sm text-white" onClick={activateLicense}>
+            激活
+          </button>
+        </div>
+        <p className={`mt-2 text-xs ${licenseStatus.valid ? "text-green-700" : "text-neutral-500"}`}>
+          {licenseStatus.valid ? `${licenseStatus.planId?.toUpperCase()} 已激活` : "当前未激活授权码"}
+        </p>
+      </div>
+
+      <div>
+        <p className="label">接口类型</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className={`border border-line px-3 py-2 text-sm ${apiProvider === "azure" ? "bg-ink text-white" : "bg-white text-ink"}`}
+            onClick={() => setApiProvider("azure")}
+          >
+            客户 Azure
+          </button>
+          <button
+            type="button"
+            className={`border border-line px-3 py-2 text-sm ${apiProvider === "openai" ? "bg-ink text-white" : "bg-white text-ink"}`}
+            onClick={() => setApiProvider("openai")}
+          >
+            客户 OpenAI
+          </button>
+        </div>
+
+        <p className="label mt-3">API Key</p>
+        <input
+          className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+          type="password"
+          value={apiKey}
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder={apiProvider === "azure" ? "粘贴客户 Azure OpenAI API Key" : "粘贴客户 OpenAI sk-... API Key"}
+        />
+        <p className="mt-1 text-xs text-neutral-500">
+          只走客户自己的接口配置：客户 Azure 或客户 OpenAI。不会使用平台 Azure Key。
+        </p>
+
+        {apiProvider === "azure" ? (
+          <div className="mt-2 space-y-2">
+            <input
+              className="w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+              value={azureEndpoint}
+              onChange={(event) => setAzureEndpoint(event.target.value)}
+              placeholder="Azure Endpoint，例如 https://xxx.cognitiveservices.azure.com/"
+            />
+            <input
+              className="w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+              value={azureDeployment}
+              onChange={(event) => setAzureDeployment(event.target.value)}
+              placeholder="Deployment，例如 gpt-image-2"
+            />
+            <input
+              className="w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+              value={azureApiVersion}
+              onChange={(event) => setAzureApiVersion(event.target.value)}
+              placeholder="API Version，例如 2025-04-01-preview"
+            />
+          </div>
+        ) : (
+          <input
+            className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+            value={baseURL}
+            onChange={(event) => setBaseURL(event.target.value)}
+            placeholder="OPENAI_BASE_URL，例如 https://api.openai.com/v1 或代理地址"
+          />
+        )}
+
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-xs text-neutral-500">
+            {apiKey ? `已填写：${maskApiKey(apiKey)}` : "平台不会保存你的完整 Key"}
+          </span>
+          <div className="flex gap-2">
+            <button className="border border-line bg-white px-3 py-1.5 text-xs" onClick={clearApiKey}>
+              清除
+            </button>
+            <button className="border border-line bg-white px-3 py-1.5 text-xs" onClick={saveApiKey}>
+              保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccessControlPanel({
+  licenseCode,
+  setLicenseCode,
+  licenseStatus,
+  activateLicense,
+  apiProvider,
+  setApiProvider,
+  apiKey,
+  setApiKey,
+  baseURL,
+  setBaseURL,
+  azureEndpoint,
+  setAzureEndpoint,
+  azureDeployment,
+  setAzureDeployment,
+  azureApiVersion,
+  setAzureApiVersion,
+  saveApiKey,
+  clearApiKey,
+}: {
+  licenseCode: string;
+  setLicenseCode: (value: string) => void;
+  licenseStatus: LicenseStatus;
+  activateLicense: () => void | Promise<void>;
+  apiProvider: ApiProvider;
+  setApiProvider: (value: ApiProvider) => void;
+  apiKey: string;
+  setApiKey: (value: string) => void;
+  baseURL: string;
+  setBaseURL: (value: string) => void;
+  azureEndpoint: string;
+  setAzureEndpoint: (value: string) => void;
+  azureDeployment: string;
+  setAzureDeployment: (value: string) => void;
+  azureApiVersion: string;
+  setAzureApiVersion: (value: string) => void;
   saveApiKey: () => void;
   clearApiKey: () => void;
 }) {

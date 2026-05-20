@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  azureOpenAIEndpoint,
-  hasAzureImageConfig,
-  openAIBaseURL,
-} from "@/lib/openai";
+import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
 
 export const runtime = "nodejs";
 
@@ -23,97 +19,103 @@ function looksLikeOpenAIKey(apiKey: string) {
   return /^sk-/i.test(apiKey.trim());
 }
 
-function cleanOptionalBaseURL(value?: string) {
+function cleanURL(value?: string) {
   const trimmed = value?.trim() || "";
   if (!trimmed || !/^https?:\/\//i.test(trimmed)) return "";
   return trimmed.replace(/\/$/, "");
 }
 
-export async function GET() {
-  if (hasAzureImageConfig()) {
-    return NextResponse.json({
-      ok: true,
-      type: "azure",
-      message: "连接成功：服务器已配置 Azure OpenAI 图片部署。",
-      baseURL: "azure",
-      endpoint: azureOpenAIEndpoint,
-    });
-  }
+function parseAzureEndpoint(endpoint?: string) {
+  const cleaned = cleanURL(endpoint);
+  if (!cleaned || !cleaned.includes("cognitiveservices.azure.com")) return null;
 
-  if (!process.env.OPENAI_API_KEY) {
+  try {
+    const url = new URL(cleaned);
+    const deployment = url.pathname.match(/\/deployments\/([^/]+)/)?.[1] || "";
+    const endpointPath = url.pathname.split("/openai/")[0] || "";
+    return {
+      endpoint: `${url.origin}${endpointPath}`.replace(/\/?$/, "/"),
+      deployment,
+      apiVersion: url.searchParams.get("api-version") || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    type: "customer-key",
+    message: "当前版本只使用客户自己的 Azure OpenAI 或 OpenAI 配置，平台不会使用服务器 API Key。",
+  });
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => ({}))) as {
+    apiProvider?: ApiProvider;
+    apiKey?: string;
+    baseURL?: string;
+    azureEndpoint?: string;
+    azureDeployment?: string;
+    azureApiVersion?: string;
+  };
+
+  const provider = body.apiProvider === "openai" ? "openai" : "azure";
+  const apiKey = body.apiKey?.trim() || "";
+
+  if (!apiKey) {
     return NextResponse.json(
-      { ok: false, error: "API Key 缺失：请在 .env.local 中配置 OPENAI_API_KEY。" },
+      { ok: false, error: "API Key 缺失：请先填写客户自己的 API Key。" },
       { status: 400 },
     );
   }
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
-    const response = await fetch(`${openAIBaseURL.replace(/\/$/, "")}/models`, {
-      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+  if (provider === "azure") {
+    const parsedAzure = parseAzureEndpoint(body.azureEndpoint) || parseAzureEndpoint(body.baseURL);
+    const endpoint = parsedAzure?.endpoint || cleanURL(body.azureEndpoint);
+    const deployment = parsedAzure?.deployment || body.azureDeployment?.trim() || "";
+    const apiVersion = parsedAzure?.apiVersion || body.azureApiVersion?.trim() || "2025-04-01-preview";
 
-    if (!response.ok) {
+    if (!endpoint || !deployment) {
       return NextResponse.json(
-        { ok: false, error: classifyError(`${response.status} ${response.statusText}`), baseURL: openAIBaseURL },
-        { status: response.status },
+        {
+          ok: false,
+          error:
+            "客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。Endpoint 可以填资源地址，也可以填完整 images/generations 终结点。",
+        },
+        { status: 400 },
       );
     }
 
     return NextResponse.json({
       ok: true,
-      type: "openai",
-      message: "连接成功。",
-      baseURL: openAIBaseURL,
+      type: "azure",
+      message: "Azure 配置格式通过：生成时会使用客户自己的 Azure OpenAI Key、Endpoint 和 Deployment。",
+      endpoint,
+      deployment,
+      apiVersion,
     });
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: classifyError(error), baseURL: openAIBaseURL },
-      { status: 500 },
-    );
   }
-}
 
-export async function POST(request: Request) {
-  const body = (await request.json().catch(() => ({}))) as {
-    apiKey?: string;
-    baseURL?: string;
-  };
-  const apiKey = body.apiKey?.trim() || "";
-  const customBaseURL = cleanOptionalBaseURL(body.baseURL);
-
-  if (!apiKey) {
+  if (!looksLikeOpenAIKey(apiKey)) {
     return NextResponse.json(
-      { ok: false, error: "API Key 缺失：请先填写你的 OpenAI 或 Azure OpenAI API Key。" },
+      { ok: false, error: "客户 OpenAI 模式需要填写 sk- 开头的 OpenAI API Key。Azure 密钥请切换到客户 Azure 模式。" },
       { status: 400 },
     );
   }
 
-  if (!looksLikeOpenAIKey(apiKey) && hasAzureImageConfig()) {
-    return NextResponse.json({
-      ok: true,
-      type: "azure",
-      message: "已识别为 Azure OpenAI 密钥，服务器 Azure 图片部署配置可用。",
-      baseURL: "azure",
-      endpoint: azureOpenAIEndpoint,
-    });
-  }
-
-  if (!looksLikeOpenAIKey(apiKey) && !customBaseURL) {
+  const baseURL = cleanURL(body.baseURL);
+  if (!baseURL) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "检测到这不是普通 OpenAI sk- 密钥。若这是 Azure OpenAI 密钥，请先在服务器配置 AZURE_OPENAI_ENDPOINT 和 AZURE_OPENAI_DEPLOYMENT。",
+          "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1 或你的 OpenAI 代理地址。",
       },
       { status: 400 },
     );
   }
-
-  const baseURL = customBaseURL || "https://api.openai.com/v1";
 
   try {
     const controller = new AbortController();
@@ -138,7 +140,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       type: "openai",
-      message: "连接成功：当前使用客户自己的 OpenAI API Key。",
+      message: "OpenAI 配置检测成功：生成时会使用客户自己的 OpenAI API Key 和 Base URL。",
       baseURL,
     });
   } catch (error) {
