@@ -61,7 +61,6 @@ import { loadUserApiKey, saveUserApiKey, clearUserApiKey } from "@/lib/apiKey/us
 import { maskApiKey } from "@/lib/apiKey/maskApiKey";
 import { hasFeatureAccess } from "@/lib/license/featureAccess";
 import { loadLicenseCode, saveLicenseCode } from "@/lib/license/licenseStorage";
-import { verifyLicense } from "@/lib/license/verifyLicense";
 import type { FeatureKey, LicenseStatus } from "@/lib/license/licenseTypes";
 import { workflowRegistry } from "@/lib/workflows/workflowRegistry";
 import type { WorkflowId } from "@/lib/workflows/workflowTypes";
@@ -122,6 +121,40 @@ const historyKey = "ecommerce-image-workflow-history-v2";
 const showWorkflowInternals = true;
 const hiddenPromptText = "工作流内部提示词已隐藏。";
 
+const emptyLicenseStatus: LicenseStatus = {
+  valid: false,
+  code: "",
+  features: [],
+  message: "当前未激活授权码",
+};
+
+async function verifyLicenseOnServer(code: string): Promise<LicenseStatus> {
+  const normalizedCode = code.trim();
+  if (!normalizedCode) {
+    return emptyLicenseStatus;
+  }
+
+  try {
+    const response = await fetch("/api/license/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: normalizedCode }),
+    });
+    const payload = (await response.json().catch(() => null)) as LicenseStatus | null;
+    if (payload && typeof payload.valid === "boolean") {
+      return payload;
+    }
+  } catch {
+    // Keep the UI stable when the license API is temporarily unavailable.
+  }
+
+  return {
+    ...emptyLicenseStatus,
+    code: normalizedCode,
+    message: "授权服务暂时不可用，请稍后重试。",
+  };
+}
+
 function withPlatform(value: string, platform: EcommercePlatformId) {
   return [value.trim(), platformPrompt(platform)].filter(Boolean).join("\n");
 }
@@ -146,9 +179,8 @@ export default function Home() {
   const [showLogs, setShowLogs] = useState(true);
   const [downloadingHistoryId, setDownloadingHistoryId] = useState("");
   const [licenseCode, setLicenseCode] = useState("");
-  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>(() =>
-    verifyLicense(""),
-  );
+  const [licenseStatus, setLicenseStatus] =
+    useState<LicenseStatus>(emptyLicenseStatus);
   const [userApiKey, setUserApiKey] = useState("");
   const [userBaseURL, setUserBaseURL] = useState("");
 
@@ -366,13 +398,24 @@ export default function Home() {
   ]);
 
   useEffect(() => {
+    let cancelled = false;
     setHasMounted(true);
     const storedLicense = loadLicenseCode();
     const storedApiKey = loadUserApiKey();
     setLicenseCode(storedLicense);
-    setLicenseStatus(verifyLicense(storedLicense));
+    setLicenseStatus(emptyLicenseStatus);
+    if (storedLicense) {
+      verifyLicenseOnServer(storedLicense).then((next) => {
+        if (!cancelled) {
+          setLicenseStatus(next);
+        }
+      });
+    }
     setUserApiKey(storedApiKey.apiKey);
     setUserBaseURL(storedApiKey.baseURL || "");
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -482,8 +525,8 @@ export default function Home() {
     setLogs([]);
   }
 
-  function activateLicense() {
-    const next = verifyLicense(licenseCode);
+  async function activateLicense() {
+    const next = await verifyLicenseOnServer(licenseCode);
     setLicenseStatus(next);
     if (next.valid) {
       saveLicenseCode(licenseCode);
@@ -1563,7 +1606,7 @@ function AccessControlPanel({
   licenseCode: string;
   setLicenseCode: (value: string) => void;
   licenseStatus: LicenseStatus;
-  activateLicense: () => void;
+  activateLicense: () => void | Promise<void>;
   apiKey: string;
   setApiKey: (value: string) => void;
   baseURL: string;
