@@ -573,6 +573,10 @@ export default function Home() {
     formData.append("azureApiVersion", config.azureApiVersion);
   }
 
+  function isAzureEndpoint(value: string) {
+    return value.toLowerCase().includes("cognitiveservices.azure.com");
+  }
+
   async function checkOpenAIStatus() {
     setIsChecking(true);
     setError("");
@@ -623,8 +627,13 @@ export default function Home() {
       return;
     }
 
-    if (apiProvider === "azure" && (!azureEndpoint.trim() || !azureDeployment.trim())) {
-      setError("客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。");
+    if (apiProvider === "azure" && !azureEndpoint.trim()) {
+      setError("请填写接口地址。Azure 可填资源地址；OpenAI 兼容接口可填 /v1、/v1/images/generations 或 /v1/images/edits。");
+      return;
+    }
+
+    if (apiProvider === "azure" && isAzureEndpoint(azureEndpoint) && !azureDeployment.trim()) {
+      setError("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
       return;
     }
 
@@ -660,8 +669,13 @@ export default function Home() {
       return false;
     }
 
-    if (requireApiKey && apiProvider === "azure" && (!azureEndpoint.trim() || !azureDeployment.trim())) {
-      setError("客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。");
+    if (requireApiKey && apiProvider === "azure" && !azureEndpoint.trim()) {
+      setError("请填写接口地址。Azure 可填资源地址；OpenAI 兼容接口可填 /v1、/v1/images/generations 或 /v1/images/edits。");
+      return false;
+    }
+
+    if (requireApiKey && apiProvider === "azure" && isAzureEndpoint(azureEndpoint) && !azureDeployment.trim()) {
+      setError("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
       return false;
     }
 

@@ -11,14 +11,38 @@ export function sanitizeApiKeyError(message: string, apiKey?: string) {
   return apiKey ? message.replaceAll(apiKey, "[API_KEY_HIDDEN]") : message;
 }
 
-function looksLikeOpenAIKey(apiKey: string) {
-  return /^sk-/i.test(apiKey.trim());
-}
-
-function cleanOptionalBaseURL(value?: string) {
+function cleanURL(value?: string) {
   const trimmed = value?.trim() || "";
   if (!trimmed || !/^https?:\/\//i.test(trimmed)) return "";
   return trimmed.replace(/\/$/, "");
+}
+
+export function normalizeOpenAICompatibleBaseURL(value?: string) {
+  const cleaned = cleanURL(value);
+  if (!cleaned) return "";
+
+  try {
+    const url = new URL(cleaned);
+    url.search = "";
+
+    const imageEndpointMatch = url.pathname.match(
+      /^(.*?\/v\d+)\/images\/(?:generations|edits|variations)\/?$/i,
+    );
+    if (imageEndpointMatch?.[1]) {
+      url.pathname = imageEndpointMatch[1];
+      return url.toString().replace(/\/$/, "");
+    }
+
+    const versionRootMatch = url.pathname.match(/^(.*?\/v\d+)\/?$/i);
+    if (versionRootMatch?.[1]) {
+      url.pathname = versionRootMatch[1];
+      return url.toString().replace(/\/$/, "");
+    }
+
+    return cleaned;
+  } catch {
+    return cleaned;
+  }
 }
 
 function parseAzureConnection(
@@ -26,7 +50,7 @@ function parseAzureConnection(
   deployment?: string,
   apiVersion?: string,
 ): AzureConnection | null {
-  const cleaned = cleanOptionalBaseURL(endpointOrFullUrl);
+  const cleaned = cleanURL(endpointOrFullUrl);
   if (!cleaned || !cleaned.includes("cognitiveservices.azure.com")) return null;
 
   try {
@@ -70,25 +94,31 @@ export function createOpenAIClientFromRequest(
       parseAzureConnection(config.azureEndpoint, config.azureDeployment, config.azureApiVersion) ||
       parseAzureConnection(config.baseURL, config.azureDeployment, config.azureApiVersion);
 
-    if (!azureConnection?.endpoint || !azureConnection.deployment) {
-      throw new Error(
-        "客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。Endpoint 可以填资源地址，也可以填完整 images/generations 终结点。",
-      );
+    if (azureConnection) {
+      if (!azureConnection.deployment) {
+        throw new Error("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
+      }
+      return createAzureClient(apiKey, azureConnection, timeout);
     }
 
-    return createAzureClient(apiKey, azureConnection, timeout);
-  }
+    const compatibleBaseURL = normalizeOpenAICompatibleBaseURL(config.azureEndpoint || config.baseURL);
+    if (compatibleBaseURL) {
+      return new OpenAI({
+        apiKey,
+        baseURL: compatibleBaseURL,
+        timeout,
+      });
+    }
 
-  if (!looksLikeOpenAIKey(apiKey)) {
     throw new Error(
-      "普通 OpenAI 模式需要填写 sk- 开头的 OpenAI API Key。Azure 密钥请切换到客户 Azure 模式。",
+      "请填写接口地址。Azure 可填资源地址或完整 images/generations；OpenAI 兼容接口可填 /v1、/v1/images/generations 或 /v1/images/edits。",
     );
   }
 
-  const baseURL = cleanOptionalBaseURL(config.baseURL);
+  const baseURL = normalizeOpenAICompatibleBaseURL(config.baseURL || config.azureEndpoint);
   if (!baseURL) {
     throw new Error(
-      "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1 或你的 OpenAI 代理地址。",
+      "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1，也可以填写完整 /v1/images/generations 或 /v1/images/edits。",
     );
   }
 

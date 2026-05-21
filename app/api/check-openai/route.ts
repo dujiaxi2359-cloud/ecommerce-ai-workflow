@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
+import { normalizeOpenAICompatibleBaseURL } from "@/lib/apiKey/openaiClientFromRequest";
 
 export const runtime = "nodejs";
 
@@ -13,10 +14,6 @@ function classifyError(error: unknown) {
   if (lower.includes("fetch failed") || lower.includes("network")) return "network error 网络错误";
   if (lower.includes("invalid url") || lower.includes("base")) return "baseURL 配置错误";
   return message;
-}
-
-function looksLikeOpenAIKey(apiKey: string) {
-  return /^sk-/i.test(apiKey.trim());
 }
 
 function cleanURL(value?: string) {
@@ -47,7 +44,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     type: "customer-key",
-    message: "当前版本只使用客户自己的 Azure OpenAI 或 OpenAI 配置，平台不会使用服务器 API Key。",
+    message: "当前版本只使用客户自己的 Azure OpenAI 或 OpenAI 兼容接口配置。",
   });
 }
 
@@ -73,45 +70,52 @@ export async function POST(request: Request) {
 
   if (provider === "azure") {
     const parsedAzure = parseAzureEndpoint(body.azureEndpoint) || parseAzureEndpoint(body.baseURL);
-    const endpoint = parsedAzure?.endpoint || cleanURL(body.azureEndpoint);
-    const deployment = parsedAzure?.deployment || body.azureDeployment?.trim() || "";
-    const apiVersion = parsedAzure?.apiVersion || body.azureApiVersion?.trim() || "2025-04-01-preview";
+    if (parsedAzure) {
+      const deployment = parsedAzure.deployment || body.azureDeployment?.trim() || "";
+      if (!deployment) {
+        return NextResponse.json(
+          { ok: false, error: "客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。" },
+          { status: 400 },
+        );
+      }
 
-    if (!endpoint || !deployment) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。Endpoint 可以填资源地址，也可以填完整 images/generations 终结点。",
-        },
-        { status: 400 },
-      );
+      return NextResponse.json({
+        ok: true,
+        type: "azure",
+        message: "Azure 配置格式通过：生成时会使用客户自己的 Azure OpenAI Key、Endpoint 和 Deployment。",
+        endpoint: parsedAzure.endpoint,
+        deployment,
+        apiVersion: parsedAzure.apiVersion || body.azureApiVersion || "2025-04-01-preview",
+      });
     }
 
-    return NextResponse.json({
-      ok: true,
-      type: "azure",
-      message: "Azure 配置格式通过：生成时会使用客户自己的 Azure OpenAI Key、Endpoint 和 Deployment。",
-      endpoint,
-      deployment,
-      apiVersion,
-    });
-  }
+    const compatibleBaseURL = normalizeOpenAICompatibleBaseURL(body.azureEndpoint || body.baseURL);
+    if (compatibleBaseURL) {
+      return NextResponse.json({
+        ok: true,
+        type: "openai-compatible",
+        message: `已识别为 OpenAI 兼容接口，实际使用地址：${compatibleBaseURL}`,
+        baseURL: compatibleBaseURL,
+      });
+    }
 
-  if (!looksLikeOpenAIKey(apiKey)) {
     return NextResponse.json(
-      { ok: false, error: "客户 OpenAI 模式需要填写 sk- 开头的 OpenAI API Key。Azure 密钥请切换到客户 Azure 模式。" },
+      {
+        ok: false,
+        error:
+          "请填写接口地址。Azure 可填资源地址或完整 images/generations；OpenAI 兼容接口可填 /v1、/v1/images/generations 或 /v1/images/edits。",
+      },
       { status: 400 },
     );
   }
 
-  const baseURL = cleanURL(body.baseURL);
+  const baseURL = normalizeOpenAICompatibleBaseURL(body.baseURL || body.azureEndpoint);
   if (!baseURL) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1 或你的 OpenAI 代理地址。",
+          "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1，也可以填写完整 /v1/images/generations 或 /v1/images/edits。",
       },
       { status: 400 },
     );
@@ -140,7 +144,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       type: "openai",
-      message: "OpenAI 配置检测成功：生成时会使用客户自己的 OpenAI API Key 和 Base URL。",
+      message: `OpenAI 兼容配置检测成功，实际使用地址：${baseURL}`,
       baseURL,
     });
   } catch (error) {
