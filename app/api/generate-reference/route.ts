@@ -94,6 +94,7 @@ export async function POST(request: Request) {
             id: historyMeta.id,
             workflow: historyMeta.workflow,
             title: historyMeta.title,
+            customerId: auth.license.code,
             outputType: historyMeta.outputType,
             referenceThumb: historyMeta.referenceThumb,
             productThumb: historyMeta.productThumb,

@@ -103,6 +103,7 @@ type HistoryItem = {
   title: string;
   finalPrompt: string;
   createdAt: string;
+  customerId?: string;
   outputType?: string;
   referenceThumb?: string;
   productThumb?: string;
@@ -131,6 +132,19 @@ const emptyLicenseStatus: LicenseStatus = {
 
 function normalizeClientLicenseCode(code: string) {
   return code.trim().replace(/\s+/g, "").toUpperCase();
+}
+
+function historyStorageKeyForLicense(code: string) {
+  const normalizedCode = normalizeClientLicenseCode(code);
+  return normalizedCode ? `${historyKey}-${normalizedCode}` : `${historyKey}-anonymous`;
+}
+
+function historyApiUrlForLicense(code: string, status: LicenseStatus) {
+  const normalizedCode = normalizeClientLicenseCode(code);
+  if (!normalizedCode) return "/api/history";
+
+  const key = status.valid && status.planId === "studio" ? "adminCode" : "licenseCode";
+  return `/api/history?${key}=${encodeURIComponent(normalizedCode)}`;
 }
 
 function getClientFallbackLicense(code: string): LicenseStatus | null {
@@ -477,34 +491,47 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!hasMounted) return;
+
+    let cancelled = false;
+    const activeLicenseCode = licenseStatus.valid ? licenseStatus.code : "";
+    const currentHistoryKey = historyStorageKeyForLicense(activeLicenseCode);
     let localHistory: HistoryItem[] = [];
 
-    const raw = localStorage.getItem(historyKey);
+    const raw = localStorage.getItem(currentHistoryKey);
     if (raw) {
       try {
         localHistory = JSON.parse(raw) as HistoryItem[];
         setHistory(localHistory);
       } catch {
-        localStorage.removeItem(historyKey);
+        localStorage.removeItem(currentHistoryKey);
       }
+    } else {
+      setHistory([]);
     }
 
-    fetch("/api/history", { cache: "no-store" })
+    fetch(historyApiUrlForLicense(activeLicenseCode, licenseStatus), { cache: "no-store" })
       .then((response) => response.json())
       .then((payload) => {
+        if (cancelled) return;
         const sharedHistory = (payload.history || []) as HistoryItem[];
         const merged = mergeHistory(sharedHistory, localHistory);
         setHistory(merged);
-        localStorage.setItem(historyKey, JSON.stringify(merged));
-        syncLocalHistoryToServer(localHistory);
+        localStorage.setItem(currentHistoryKey, JSON.stringify(merged));
+        syncLocalHistoryToServer(localHistory, activeLicenseCode);
       })
       .catch(() => {
+        if (cancelled) return;
         if (localHistory.length) {
           setHistory(localHistory);
         }
-        syncLocalHistoryToServer(localHistory);
+        syncLocalHistoryToServer(localHistory, activeLicenseCode);
       });
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasMounted, licenseStatus.code, licenseStatus.valid, licenseStatus.planId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -712,11 +739,16 @@ export default function Home() {
   }
 
   async function persistHistory(item: HistoryItem, itemImages: GeneratedImage[]) {
-    const next = mergeHistory([item], history).slice(0, 40);
+    const activeLicenseCode = licenseStatus.valid
+      ? licenseStatus.code
+      : normalizeClientLicenseCode(licenseCode);
+    const currentHistoryKey = historyStorageKeyForLicense(activeLicenseCode);
+    const historyItem = { ...item, customerId: activeLicenseCode };
+    const next = mergeHistory([historyItem], history).slice(0, 40);
     setHistory(next);
     try {
-      localStorage.setItem(historyKey, JSON.stringify(next));
-      await saveHistoryImages(item.id, itemImages);
+      localStorage.setItem(currentHistoryKey, JSON.stringify(next));
+      await saveHistoryImages(historyItem.id, itemImages);
     } catch {
       setStatus("图片已生成并保存到共享历史，本机浏览器缓存空间不足，已跳过本地缓存。");
     }
@@ -725,7 +757,11 @@ export default function Home() {
       const response = await fetch("/api/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ item, images: itemImages }),
+        body: JSON.stringify({
+          item: historyItem,
+          images: itemImages,
+          licenseCode: activeLicenseCode,
+        }),
       });
       const payload = await response.json();
 
@@ -741,16 +777,24 @@ export default function Home() {
     }
   }
 
-  async function syncLocalHistoryToServer(items: HistoryItem[]) {
+  async function syncLocalHistoryToServer(items: HistoryItem[], activeLicenseCode: string) {
+    const customerId = normalizeClientLicenseCode(activeLicenseCode);
+    if (!customerId) return;
+
     for (const item of items.slice(0, 40)) {
       try {
-        const itemImages = await getHistoryImages(item.id);
+        const itemWithCustomer = { ...item, customerId };
+        const itemImages = await getHistoryImages(itemWithCustomer.id);
         if (!itemImages?.length) continue;
 
         await fetch("/api/history", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ item, images: itemImages }),
+          body: JSON.stringify({
+            item: itemWithCustomer,
+            images: itemImages,
+            licenseCode: customerId,
+          }),
         });
       } catch {
         // Local history sync is best-effort; generation and downloads still work.
@@ -1161,7 +1205,14 @@ export default function Home() {
       let storedImages = (await getHistoryImages(item.id)) || [];
 
       if (!storedImages?.length) {
-        const response = await fetch(`/api/history/${item.id}`, {
+        const activeLicenseCode = licenseStatus.valid
+          ? licenseStatus.code
+          : normalizeClientLicenseCode(licenseCode);
+        const historyQuery =
+          licenseStatus.valid && licenseStatus.planId === "studio"
+            ? `adminCode=${encodeURIComponent(activeLicenseCode)}`
+            : `licenseCode=${encodeURIComponent(activeLicenseCode)}`;
+        const response = await fetch(`/api/history/${item.id}?${historyQuery}`, {
           cache: "no-store",
         });
         const payload = await response.json();

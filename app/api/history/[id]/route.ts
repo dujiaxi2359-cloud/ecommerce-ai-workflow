@@ -1,14 +1,46 @@
 import { NextResponse } from "next/server";
-import { getSharedHistoryImages } from "@/lib/server-history";
+import {
+  getSharedHistoryImages,
+  listSharedHistory,
+  normalizeHistoryCustomerId,
+} from "@/lib/server-history";
+import { verifyLicense } from "@/lib/license/verifyLicense";
 
 export const runtime = "nodejs";
 
+function isAdminHistoryCode(code: string) {
+  const normalizedCode = normalizeHistoryCustomerId(code);
+  if (!normalizedCode) return false;
+
+  const envAdminCode = normalizeHistoryCustomerId(process.env.COMMERCE_AI_ADMIN_CODE);
+  if (envAdminCode && normalizedCode === envAdminCode) return true;
+
+  const license = verifyLicense(normalizedCode);
+  return license.valid && license.planId === "studio";
+}
+
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await context.params;
+    const url = new URL(request.url);
+    const adminCode =
+      url.searchParams.get("adminCode") || request.headers.get("x-admin-code") || "";
+    const licenseCode =
+      url.searchParams.get("licenseCode") || request.headers.get("x-license-code") || "";
+
+    if (!isAdminHistoryCode(adminCode)) {
+      const customerId = normalizeHistoryCustomerId(licenseCode);
+      const history = await listSharedHistory();
+      const item = history.find((entry) => entry.id === id);
+
+      if (!item || normalizeHistoryCustomerId(item.customerId) !== customerId) {
+        return NextResponse.json({ error: "无权读取这条历史记录。" }, { status: 403 });
+      }
+    }
+
     return NextResponse.json({ images: await getSharedHistoryImages(id) });
   } catch (error) {
     return NextResponse.json(

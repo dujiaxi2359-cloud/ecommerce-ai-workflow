@@ -29,11 +29,13 @@ function parseHistoryMeta(value: FormDataEntryValue | null) {
 
 async function saveGeneratedHistory({
   meta,
+  customerId,
   finalPrompt,
   createdAt,
   images,
 }: {
   meta: Partial<SharedHistoryItem> | null;
+  customerId: string;
   finalPrompt: string;
   createdAt: string;
   images: Awaited<ReturnType<typeof generateImage>>["images"];
@@ -46,6 +48,7 @@ async function saveGeneratedHistory({
         id: meta.id,
         workflow: meta.workflow,
         title: meta.title,
+        customerId,
         outputType: meta.outputType,
         referenceThumb: meta.referenceThumb,
         productThumb: meta.productThumb,
@@ -125,6 +128,7 @@ export async function POST(request: Request) {
     const createdAt = new Date().toISOString();
     const historyItem = await saveGeneratedHistory({
       meta: historyMeta,
+      customerId: auth.license.code,
       finalPrompt: publicPrompt(),
       createdAt,
       images: result.images,

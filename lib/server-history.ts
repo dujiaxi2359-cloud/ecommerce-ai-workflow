@@ -8,6 +8,7 @@ export type SharedHistoryItem = {
   title: string;
   finalPrompt: string;
   createdAt: string;
+  customerId?: string;
   outputType?: string;
   referenceThumb?: string;
   productThumb?: string;
@@ -23,6 +24,10 @@ const indexPath = path.join(historyRoot, "index.json");
 
 function safeId(id: string) {
   return id.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+export function normalizeHistoryCustomerId(value?: string | null) {
+  return (value || "").trim().replace(/\s+/g, "").toUpperCase();
 }
 
 async function ensureHistoryRoot() {
@@ -74,6 +79,16 @@ export async function listSharedHistory() {
   return index.items;
 }
 
+export async function listSharedHistoryForCustomer(customerId: string) {
+  const normalizedCustomerId = normalizeHistoryCustomerId(customerId);
+  if (!normalizedCustomerId) return [];
+
+  const index = await readIndex();
+  return index.items.filter(
+    (item) => normalizeHistoryCustomerId(item.customerId) === normalizedCustomerId,
+  );
+}
+
 export async function saveSharedHistory(
   item: SharedHistoryItem,
   images: GeneratedImage[],
@@ -113,7 +128,11 @@ export async function saveSharedHistory(
   );
 
   const index = await readIndex();
-  const nextItem = { ...item, imageCount: images.length };
+  const nextItem = {
+    ...item,
+    customerId: normalizeHistoryCustomerId(item.customerId),
+    imageCount: images.length,
+  };
   const nextItems = [nextItem, ...index.items.filter((entry) => entry.id !== item.id)].slice(
     0,
     80,
