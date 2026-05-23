@@ -245,7 +245,7 @@ export default function Home() {
   const [licenseCode, setLicenseCode] = useState("");
   const [licenseStatus, setLicenseStatus] =
     useState<LicenseStatus>(emptyLicenseStatus);
-  const [apiProvider, setApiProvider] = useState<ApiProvider>("azure");
+  const [apiProvider, setApiProvider] = useState<ApiProvider>("openai");
   const [userApiKey, setUserApiKey] = useState("");
   const [userBaseURL, setUserBaseURL] = useState("");
   const [azureEndpoint, setAzureEndpoint] = useState("");
@@ -481,7 +481,7 @@ export default function Home() {
     }
     setUserApiKey(storedApiKey.apiKey);
     setUserBaseURL(storedApiKey.baseURL || "");
-    setApiProvider(storedApiKey.provider || "azure");
+    setApiProvider(storedApiKey.provider || "openai");
     setAzureEndpoint(storedApiKey.azureEndpoint || "");
     setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
     setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
@@ -664,11 +664,6 @@ export default function Home() {
       return;
     }
 
-    if (apiProvider === "openai" && !userBaseURL.trim()) {
-      setError("客户 OpenAI 模式需要填写 OPENAI_BASE_URL。");
-      return;
-    }
-
     saveUserApiKey(apiConfigPayload());
     setStatus(`API Key 已保存到本机浏览器：${maskApiKey(userApiKey)}`);
     setError("");
@@ -676,7 +671,7 @@ export default function Home() {
 
   function clearApiKeyConfig() {
     clearUserApiKey();
-    setApiProvider("azure");
+    setApiProvider("openai");
     setUserApiKey("");
     setUserBaseURL("");
     setAzureEndpoint("");
@@ -703,11 +698,6 @@ export default function Home() {
 
     if (requireApiKey && apiProvider === "azure" && isAzureEndpoint(azureEndpoint) && !azureDeployment.trim()) {
       setError("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
-      return false;
-    }
-
-    if (requireApiKey && apiProvider === "openai" && !userBaseURL.trim()) {
-      setError("客户 OpenAI 模式需要填写 OPENAI_BASE_URL。");
       return false;
     }
 
@@ -1146,8 +1136,16 @@ export default function Home() {
         throw new Error(payload.error || "Generation failed. Please retry later.");
       }
 
+      const nextImages = payload.images || [];
+      if (!nextImages.length) {
+        throw new Error(
+          payload.error ||
+            "接口已返回成功，但没有返回图片。请确认当前 API Key 和模型支持 images.generate / images.edit，并检查代理是否完整返回 data[0].b64_json 或 data[0].url。",
+        );
+      }
+
       setError("");
-      setImages(payload.images || []);
+      setImages(nextImages);
       setFinalPrompt(
         showWorkflowInternals
           ? payload.finalPrompt || promptPreview
@@ -1160,13 +1158,13 @@ export default function Home() {
 
       const historyItem = payload.historyItem || {
         ...historyMeta,
-        imageCount: (payload.images || []).length,
+        imageCount: nextImages.length,
         finalPrompt: showWorkflowInternals
           ? payload.finalPrompt || promptPreview
           : hiddenPromptText,
         createdAt: payload.createdAt || new Date().toISOString(),
       };
-      await persistHistory(historyItem, payload.images || []);
+      await persistHistory(historyItem, nextImages);
       setError("");
     } catch (generationError) {
       setError(

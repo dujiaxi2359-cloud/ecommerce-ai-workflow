@@ -1,130 +1,131 @@
-import OpenAI, { AzureOpenAI } from "openai";
-import type { UserApiKeyConfig } from "@/lib/apiKey/apiKeyTypes";
+import OpenAI from "openai";
+import type { ApiProvider, UserApiKeyConfig } from "./apiKeyTypes";
 
-type AzureConnection = {
-  endpoint: string;
-  deployment: string;
-  apiVersion: string;
-};
+const DEFAULT_AZURE_API_VERSION = "2025-04-01-preview";
+const DEFAULT_AZURE_DEPLOYMENT = "gpt-image-2";
+
+function readEnv(...keys: string[]) {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function withProtocol(value: string) {
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
 
 export function sanitizeApiKeyError(message: string, apiKey?: string) {
-  return apiKey ? message.replaceAll(apiKey, "[API_KEY_HIDDEN]") : message;
+  let safe = message || "接口调用失败。";
+  if (apiKey) safe = safe.split(apiKey).join("[API_KEY]");
+  return safe.replace(/sk-[A-Za-z0-9_-]{12,}/g, "sk-****");
 }
 
-function cleanURL(value?: string) {
-  const trimmed = value?.trim() || "";
-  if (!trimmed || !/^https?:\/\//i.test(trimmed)) return "";
-  return trimmed.replace(/\/$/, "");
-}
-
-export function normalizeOpenAICompatibleBaseURL(value?: string) {
-  const cleaned = cleanURL(value);
-  if (!cleaned) return "";
+export function normalizeOpenAICompatibleBaseURL(input?: string | null) {
+  const raw = input?.trim();
+  if (!raw) return undefined;
 
   try {
-    const url = new URL(cleaned);
-    url.search = "";
+    const url = new URL(withProtocol(raw));
+    let path = url.pathname.replace(/\/+$/, "");
 
-    const imageEndpointMatch = url.pathname.match(
-      /^(.*?\/v\d+)\/images\/(?:generations|edits|variations)\/?$/i,
+    path = path
+      .replace(/\/images\/generations$/i, "")
+      .replace(/\/images\/edits$/i, "")
+      .replace(/\/chat\/completions$/i, "")
+      .replace(/\/responses$/i, "");
+
+    if (!path || path === "/") path = "/v1";
+    if (!/\/v1$/i.test(path)) path = `${path}/v1`;
+
+    return trimTrailingSlash(`${url.origin}${path}`);
+  } catch {
+    throw new Error(
+      "OPENAI_BASE_URL 格式不正确。官方 OpenAI 可留空；代理请填写类似 https://域名/v1 的地址。",
     );
-    if (imageEndpointMatch?.[1]) {
-      url.pathname = imageEndpointMatch[1];
-      return url.toString().replace(/\/$/, "");
-    }
-
-    const versionRootMatch = url.pathname.match(/^(.*?\/v\d+)\/?$/i);
-    if (versionRootMatch?.[1]) {
-      url.pathname = versionRootMatch[1];
-      return url.toString().replace(/\/$/, "");
-    }
-
-    return cleaned;
-  } catch {
-    return cleaned;
   }
 }
 
-function parseAzureConnection(
-  endpointOrFullUrl?: string,
-  deployment?: string,
-  apiVersion?: string,
-): AzureConnection | null {
-  const cleaned = cleanURL(endpointOrFullUrl);
-  if (!cleaned || !cleaned.includes("cognitiveservices.azure.com")) return null;
+export function parseAzureEndpoint(input?: string | null) {
+  const raw = input?.trim();
+  if (!raw) return { endpoint: "", deployment: "", apiVersion: "" };
 
   try {
-    const url = new URL(cleaned);
-    const deploymentFromPath = url.pathname.match(/\/deployments\/([^/]+)/)?.[1];
-    const endpointPath = url.pathname.split("/openai/")[0] || "";
-    const endpoint = `${url.origin}${endpointPath}`.replace(/\/?$/, "/");
+    const url = new URL(withProtocol(raw));
+    const deployment = url.pathname.match(/\/deployments\/([^/]+)/i)?.[1] || "";
+    const apiVersion = url.searchParams.get("api-version") || "";
+    const openaiIndex = url.pathname.toLowerCase().indexOf("/openai");
+    const endpoint = `${url.origin}${openaiIndex >= 0 ? url.pathname.slice(0, openaiIndex) : ""}/`;
 
-    return {
-      endpoint,
-      deployment: deploymentFromPath || deployment?.trim() || "",
-      apiVersion: url.searchParams.get("api-version") || apiVersion?.trim() || "2025-04-01-preview",
-    };
+    return { endpoint, deployment, apiVersion };
   } catch {
-    return null;
+    return { endpoint: "", deployment: "", apiVersion: "" };
   }
 }
 
-function createAzureClient(apiKey: string, connection: AzureConnection, timeout: number) {
-  return new AzureOpenAI({
-    endpoint: connection.endpoint,
-    apiKey,
-    apiVersion: connection.apiVersion,
-    deployment: connection.deployment,
-    timeout,
-  });
+export function normalizeAzureEndpoint(input?: string | null) {
+  const raw = input?.trim();
+  if (!raw) return "";
+
+  const parsed = parseAzureEndpoint(raw);
+  if (parsed.endpoint) return parsed.endpoint;
+
+  try {
+    return `${new URL(withProtocol(raw)).origin}/`;
+  } catch {
+    throw new Error("Azure Endpoint 格式不正确。");
+  }
 }
 
-export function createOpenAIClientFromRequest(
-  config: UserApiKeyConfig,
-  timeout = 300_000,
-) {
-  const provider = config.provider || "azure";
-  const apiKey = config.apiKey?.trim() || "";
+export function createOpenAIClientFromRequest(config: UserApiKeyConfig) {
+  const provider: ApiProvider = config.provider || "openai";
+  const apiKey = config.apiKey?.trim();
+
   if (!apiKey) {
-    throw new Error("请先填写客户自己的 API Key。");
+    throw new Error("API Key 缺失：请填写客户自己的 API Key。");
   }
 
   if (provider === "azure") {
-    const azureConnection =
-      parseAzureConnection(config.azureEndpoint, config.azureDeployment, config.azureApiVersion) ||
-      parseAzureConnection(config.baseURL, config.azureDeployment, config.azureApiVersion);
+    const parsed = parseAzureEndpoint(config.azureEndpoint || config.baseURL);
+    const endpoint =
+      normalizeAzureEndpoint(config.azureEndpoint || config.baseURL) ||
+      readEnv("AZURE_OPENAI_ENDPOINT", "OPENAI_AZURE_ENDPOINT");
+    const deployment =
+      config.azureDeployment?.trim() ||
+      parsed.deployment ||
+      readEnv("AZURE_OPENAI_DEPLOYMENT", "OPENAI_AZURE_DEPLOYMENT") ||
+      DEFAULT_AZURE_DEPLOYMENT;
+    const apiVersion =
+      config.azureApiVersion?.trim() ||
+      parsed.apiVersion ||
+      readEnv("AZURE_OPENAI_API_VERSION", "OPENAI_API_VERSION") ||
+      DEFAULT_AZURE_API_VERSION;
 
-    if (azureConnection) {
-      if (!azureConnection.deployment) {
-        throw new Error("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
-      }
-      return createAzureClient(apiKey, azureConnection, timeout);
+    if (!endpoint || !deployment) {
+      throw new Error(
+        "客户 Azure 模式需要填写 Azure Endpoint 和 Deployment。Endpoint 可以填资源地址，也可以填完整 images/generations 地址。",
+      );
     }
 
-    const compatibleBaseURL = normalizeOpenAICompatibleBaseURL(config.azureEndpoint || config.baseURL);
-    if (compatibleBaseURL) {
-      return new OpenAI({
-        apiKey,
-        baseURL: compatibleBaseURL,
-        timeout,
-      });
-    }
-
-    throw new Error(
-      "请填写接口地址。Azure 可填资源地址或完整 images/generations；OpenAI 兼容接口可填 /v1、/v1/images/generations 或 /v1/images/edits。",
-    );
+    return new OpenAI({
+      apiKey,
+      baseURL: `${trimTrailingSlash(endpoint)}/openai/deployments/${deployment}`,
+      defaultQuery: { "api-version": apiVersion },
+      defaultHeaders: { "api-key": apiKey },
+      timeout: 300_000,
+    });
   }
 
-  const baseURL = normalizeOpenAICompatibleBaseURL(config.baseURL || config.azureEndpoint);
-  if (!baseURL) {
-    throw new Error(
-      "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1，也可以填写完整 /v1/images/generations 或 /v1/images/edits。",
-    );
-  }
+  const baseURL = normalizeOpenAICompatibleBaseURL(config.baseURL);
 
   return new OpenAI({
     apiKey,
-    baseURL,
-    timeout,
+    ...(baseURL ? { baseURL } : {}),
+    timeout: 300_000,
   });
 }
