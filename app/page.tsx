@@ -290,7 +290,7 @@ export default function Home() {
   const [productCategory, setProductCategory] = useState("");
   const [productPrompt, setProductPrompt] = useState("");
   const [productRatio, setProductRatio] = useState<Ratio>("1:1");
-  const [productQuality, setProductQuality] = useState<ImageQuality>("high");
+  const [productQuality, setProductQuality] = useState<ImageQuality>("low");
   const [productPlatform, setProductPlatform] =
     useState<EcommercePlatformId>("general");
   const [productProtectionLevel, setProductProtectionLevel] =

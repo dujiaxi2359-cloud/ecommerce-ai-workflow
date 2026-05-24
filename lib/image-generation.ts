@@ -94,18 +94,12 @@ async function withImageApiRetry<T>(
 function normalizeSizeForImageApi(size: ImageSize, quality: ImageQuality) {
   const [width, height] = size.split("x").map(Number);
   const minimumPixels = 1024 * 1024;
-  const targetLongEdge = quality === "high" ? 4096 : quality === "medium" ? 2048 : 1024;
-  const currentLongEdge = Math.max(width, height);
   const originalPixels = width * height;
   const pixelScale =
     originalPixels > 0 && originalPixels < minimumPixels
       ? Math.sqrt(minimumPixels / originalPixels)
       : 1;
-  const qualityScale =
-    currentLongEdge > 0 && currentLongEdge < targetLongEdge
-      ? targetLongEdge / currentLongEdge
-      : 1;
-  const scale = Math.max(pixelScale, qualityScale);
+  const scale = pixelScale;
   const scaledWidth = Math.ceil(width * scale);
   const scaledHeight = Math.ceil(height * scale);
   const nextWidth = Math.max(16, Math.ceil(scaledWidth / 16) * 16);
@@ -117,9 +111,7 @@ function normalizeSizeForImageApi(size: ImageSize, quality: ImageQuality) {
     changed: normalized !== size,
     original: size,
     reason:
-      scale === qualityScale && qualityScale > 1
-        ? `raised-to-${targetLongEdge}px-quality`
-        : originalPixels < minimumPixels
+      originalPixels < minimumPixels
         ? "raised-to-minimum-pixel-budget"
         : normalized !== size
           ? "rounded-to-multiple-of-16"

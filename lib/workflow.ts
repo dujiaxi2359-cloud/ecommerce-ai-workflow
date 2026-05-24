@@ -54,9 +54,9 @@ export const sizes = [
 ] as const;
 export const qualities = ["low", "medium", "high"] as const;
 export const qualityLabels: Record<(typeof qualities)[number], string> = {
-  low: "1K",
-  medium: "2K",
-  high: "4K",
+  low: "快速",
+  medium: "标准",
+  high: "精细",
 };
 
 export type StyleKey = keyof typeof stylePresets;
