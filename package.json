@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "node scripts/start-lan.js",
     "start:lan": "node scripts/start-lan.js",
     "start:keepalive": "node scripts/keep-alive.js",
