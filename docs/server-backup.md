@@ -103,14 +103,30 @@ TCP 3000  来源：全部 IPv4 地址
 
 ## 更新部署命令
 
-在服务器终端执行：
+推荐直接执行仓库脚本：
+
+```bash
+cd /www/wwwroot/ecommerce-ai-workflow && bash scripts/server-deploy.sh
+```
+
+如果 GitHub 直连不稳定，可以先把 origin 临时切到镜像：
+
+```bash
+cd /www/wwwroot/ecommerce-ai-workflow && \
+git remote set-url origin https://gh.llkk.cc/https://github.com/dujiaxi2359-cloud/ecommerce-ai-workflow.git && \
+bash scripts/server-deploy.sh
+```
+
+手动部署命令：
 
 ```bash
 cd /www/wwwroot/ecommerce-ai-workflow && \
 git fetch origin main && \
 git reset --hard origin/main && \
 rm -rf .next && \
+npm install --registry=https://registry.npmmirror.com --no-audit --loglevel=warn && \
 npm run build && \
+test -f .next/standalone/server.js && \
 rm -rf .next/standalone/.next/static && \
 mkdir -p .next/standalone/.next && \
 cp -r .next/static .next/standalone/.next/static && \
@@ -119,6 +135,7 @@ set -a && . ./.env.local && set +a && \
 pm2 delete ecommerce-ai-workflow || true && \
 PORT=3000 HOSTNAME=0.0.0.0 pm2 start .next/standalone/server.js --name ecommerce-ai-workflow && \
 pm2 save && \
+curl -f http://127.0.0.1:3000 && \
 /www/server/nginx/sbin/nginx -t && \
 /www/server/nginx/sbin/nginx -s reload && \
 pm2 status
@@ -130,6 +147,17 @@ pm2 status
 curl -I http://127.0.0.1:3000
 curl -I http://127.0.0.1
 pm2 logs ecommerce-ai-workflow --lines 40
+```
+
+如果页面出现 `502 Bad Gateway`，优先重新用明确端口启动：
+
+```bash
+pm2 delete ecommerce-ai-workflow || true && \
+cd /www/wwwroot/ecommerce-ai-workflow && \
+set -a && . ./.env.local && set +a && \
+PORT=3000 HOSTNAME=0.0.0.0 pm2 start .next/standalone/server.js --name ecommerce-ai-workflow && \
+pm2 save && \
+curl -I http://127.0.0.1:3000
 ```
 
 ## 授权码接口检查
