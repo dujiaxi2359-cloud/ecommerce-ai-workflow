@@ -128,11 +128,21 @@ function normalizeSizeForImageApi(size: ImageSize, quality: ImageQuality) {
 }
 
 function normalizeImages(data: { b64_json?: string; url?: string }[] = []) {
-  return data.map((item, index) => ({
-    id: createId("image"),
-    index,
-    url: item.b64_json ? `data:image/png;base64,${item.b64_json}` : item.url || "",
-  }));
+  return data
+    .map((item, index) => ({
+      id: createId("image"),
+      index,
+      url: item.b64_json ? `data:image/png;base64,${item.b64_json}` : item.url || "",
+    }))
+    .filter((image) => image.url);
+}
+
+function ensureGeneratedImages(images: GeneratedImage[], provider: string) {
+  if (images.length > 0) return images;
+
+  throw new Error(
+    `${provider} 接口请求已完成，但没有返回可用图片。请检查图片模型、Deployment/Base URL 是否指向 images 接口，以及代理或 Azure 返回值是否包含 b64_json 或 url。`,
+  );
 }
 
 async function generateAzureImage({
@@ -177,7 +187,7 @@ async function generateAzureImage({
     durationMs: Date.now() - startedAt,
     images: images.length,
   });
-  return { images };
+  return { images: ensureGeneratedImages(images, "Azure OpenAI") };
 }
 
 async function generateOpenAIImage({
@@ -219,7 +229,7 @@ async function generateOpenAIImage({
     durationMs: Date.now() - startedAt,
     images: images.length,
   });
-  return { images };
+  return { images: ensureGeneratedImages(images, "OpenAI") };
 }
 
 export async function generateImage({
@@ -306,7 +316,7 @@ export async function generateImageWithReferences({
         durationMs: Date.now() - startedAt,
         images: outputImages.length,
       });
-      return { images: outputImages };
+      return { images: ensureGeneratedImages(outputImages, "Azure OpenAI") };
     } catch (error) {
       addServerLog(
         "error",
@@ -356,5 +366,5 @@ export async function generateImageWithReferences({
     durationMs: Date.now() - startedAt,
     images: outputImages.length,
   });
-  return { images: outputImages };
+  return { images: ensureGeneratedImages(outputImages, "OpenAI") };
 }

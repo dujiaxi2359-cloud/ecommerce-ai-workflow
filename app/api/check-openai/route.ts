@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     azureApiVersion?: string;
   };
 
-  const provider = body.apiProvider === "openai" ? "openai" : "azure";
+  const provider = body.apiProvider === "azure" ? "azure" : "openai";
   const apiKey = body.apiKey?.trim() || "";
 
   if (!apiKey) {
@@ -109,17 +109,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const baseURL = normalizeOpenAICompatibleBaseURL(body.baseURL || body.azureEndpoint);
-  if (!baseURL) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "客户 OpenAI 模式需要填写 OPENAI_BASE_URL，例如 https://api.openai.com/v1，也可以填写完整 /v1/images/generations 或 /v1/images/edits。",
-      },
-      { status: 400 },
-    );
-  }
+  const baseURL =
+    normalizeOpenAICompatibleBaseURL(body.baseURL || body.azureEndpoint) ||
+    "https://api.openai.com/v1";
 
   try {
     const controller = new AbortController();
@@ -144,7 +136,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       type: "openai",
-      message: `OpenAI 兼容配置检测成功，实际使用地址：${baseURL}`,
+      message: body.baseURL?.trim()
+        ? `OpenAI 兼容配置检测成功，实际使用地址：${baseURL}`
+        : "OpenAI 官方接口检测成功：Base URL 留空时会使用 https://api.openai.com/v1。",
       baseURL,
     });
   } catch (error) {

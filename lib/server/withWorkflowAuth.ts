@@ -36,7 +36,7 @@ export function workflowAuthError(message: string, status = 403) {
 
 export async function validateWorkflowAuth({
   licenseCode,
-  apiProvider = "azure",
+  apiProvider = "openai",
   apiKey,
   baseURL,
   azureEndpoint,
@@ -101,7 +101,7 @@ export async function withWorkflowAuthFromFormData(
   try {
     return await validateWorkflowAuth({
       licenseCode: String(formData.get("licenseCode") || ""),
-      apiProvider: String(formData.get("apiProvider") || "azure") as ApiProvider,
+      apiProvider: String(formData.get("apiProvider") || "openai") as ApiProvider,
       apiKey,
       baseURL: String(formData.get("baseURL") || ""),
       azureEndpoint: String(formData.get("azureEndpoint") || ""),
@@ -136,7 +136,7 @@ export async function withWorkflowAuthFromJson(
   try {
     return await validateWorkflowAuth({
       licenseCode: body.licenseCode || "",
-      apiProvider: body.apiProvider || "azure",
+      apiProvider: body.apiProvider || "openai",
       apiKey: body.apiKey || "",
       baseURL: body.baseURL || "",
       azureEndpoint: body.azureEndpoint || "",

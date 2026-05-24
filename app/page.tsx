@@ -12,7 +12,7 @@ import {
   Upload,
   Wand2,
 } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildDetailPrompt,
   buildMimicPrompt,
@@ -465,28 +465,59 @@ export default function Home() {
     posterPlatform,
   ]);
 
+  const syncLocalHistoryToServer = useCallback(async (items: HistoryItem[], activeLicenseCode: string) => {
+    const customerId = normalizeClientLicenseCode(activeLicenseCode);
+    if (!customerId) return;
+
+    for (const item of items.slice(0, 40)) {
+      try {
+        const itemWithCustomer = { ...item, customerId };
+        const itemImages = await getHistoryImages(itemWithCustomer.id);
+        if (!itemImages?.length) continue;
+
+        await fetch("/api/history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            item: itemWithCustomer,
+            images: itemImages,
+            licenseCode: customerId,
+          }),
+        });
+      } catch {
+        // Local history sync is best-effort; generation and downloads still work.
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    setHasMounted(true);
-    const storedLicense = loadLicenseCode();
-    const storedApiKey = loadUserApiKey();
-    setLicenseCode(storedLicense);
-    setLicenseStatus(emptyLicenseStatus);
-    if (storedLicense) {
-      verifyLicenseOnServer(storedLicense).then((next) => {
-        if (!cancelled) {
-          setLicenseStatus(next);
-        }
-      });
-    }
-    setUserApiKey(storedApiKey.apiKey);
-    setUserBaseURL(storedApiKey.baseURL || "");
-    setApiProvider(storedApiKey.provider || "openai");
-    setAzureEndpoint(storedApiKey.azureEndpoint || "");
-    setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
-    setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+
+      setHasMounted(true);
+      const storedLicense = loadLicenseCode();
+      const storedApiKey = loadUserApiKey();
+      setLicenseCode(storedLicense);
+      setLicenseStatus(emptyLicenseStatus);
+      if (storedLicense) {
+        verifyLicenseOnServer(storedLicense).then((next) => {
+          if (!cancelled) {
+            setLicenseStatus(next);
+          }
+        });
+      }
+      setUserApiKey(storedApiKey.apiKey);
+      setUserBaseURL(storedApiKey.baseURL || "");
+      setApiProvider(storedApiKey.provider || "openai");
+      setAzureEndpoint(storedApiKey.azureEndpoint || "");
+      setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
+      setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
+    }, 0);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -496,42 +527,50 @@ export default function Home() {
     let cancelled = false;
     const activeLicenseCode = licenseStatus.valid ? licenseStatus.code : "";
     const currentHistoryKey = historyStorageKeyForLicense(activeLicenseCode);
-    let localHistory: HistoryItem[] = [];
+    const historyApiKey = licenseStatus.valid && licenseStatus.planId === "studio" ? "adminCode" : "licenseCode";
+    const historyApiUrl = activeLicenseCode
+      ? `/api/history?${historyApiKey}=${encodeURIComponent(normalizeClientLicenseCode(activeLicenseCode))}`
+      : "/api/history";
 
-    const raw = localStorage.getItem(currentHistoryKey);
-    if (raw) {
-      try {
-        localHistory = JSON.parse(raw) as HistoryItem[];
-        setHistory(localHistory);
-      } catch {
-        localStorage.removeItem(currentHistoryKey);
-      }
-    } else {
-      setHistory([]);
-    }
+    const timer = window.setTimeout(() => {
+      let localHistory: HistoryItem[] = [];
 
-    fetch(historyApiUrlForLicense(activeLicenseCode, licenseStatus), { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload) => {
-        if (cancelled) return;
-        const sharedHistory = (payload.history || []) as HistoryItem[];
-        const merged = mergeHistory(sharedHistory, localHistory);
-        setHistory(merged);
-        localStorage.setItem(currentHistoryKey, JSON.stringify(merged));
-        syncLocalHistoryToServer(localHistory, activeLicenseCode);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        if (localHistory.length) {
+      const raw = localStorage.getItem(currentHistoryKey);
+      if (raw) {
+        try {
+          localHistory = JSON.parse(raw) as HistoryItem[];
           setHistory(localHistory);
+        } catch {
+          localStorage.removeItem(currentHistoryKey);
         }
-        syncLocalHistoryToServer(localHistory, activeLicenseCode);
-      });
+      } else {
+        setHistory([]);
+      }
+
+      fetch(historyApiUrl, { cache: "no-store" })
+        .then((response) => response.json())
+        .then((payload) => {
+          if (cancelled) return;
+          const sharedHistory = (payload.history || []) as HistoryItem[];
+          const merged = mergeHistory(sharedHistory, localHistory);
+          setHistory(merged);
+          localStorage.setItem(currentHistoryKey, JSON.stringify(merged));
+          syncLocalHistoryToServer(localHistory, activeLicenseCode);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (localHistory.length) {
+            setHistory(localHistory);
+          }
+          syncLocalHistoryToServer(localHistory, activeLicenseCode);
+        });
+    }, 0);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [hasMounted, licenseStatus.code, licenseStatus.valid, licenseStatus.planId]);
+  }, [hasMounted, licenseStatus.code, licenseStatus.valid, licenseStatus.planId, syncLocalHistoryToServer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -764,31 +803,6 @@ export default function Home() {
           ? `图片已生成，但共享历史同步失败：${historyError.message}`
           : "图片已生成，但共享历史同步失败。",
       );
-    }
-  }
-
-  async function syncLocalHistoryToServer(items: HistoryItem[], activeLicenseCode: string) {
-    const customerId = normalizeClientLicenseCode(activeLicenseCode);
-    if (!customerId) return;
-
-    for (const item of items.slice(0, 40)) {
-      try {
-        const itemWithCustomer = { ...item, customerId };
-        const itemImages = await getHistoryImages(itemWithCustomer.id);
-        if (!itemImages?.length) continue;
-
-        await fetch("/api/history", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            item: itemWithCustomer,
-            images: itemImages,
-            licenseCode: customerId,
-          }),
-        });
-      } catch {
-        // Local history sync is best-effort; generation and downloads still work.
-      }
     }
   }
 
