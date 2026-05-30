@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const CACHE_RESET_VERSION = "e719c05";
+const CACHE_RESET_VERSION = "force-aigc-nong-20260531";
 const STORAGE_KEY = "aigc_nong_cache_reset_version";
 
 export function ClientCacheReset() {
@@ -22,6 +22,9 @@ export function ClientCacheReset() {
         if ("serviceWorker" in navigator) {
           const registrations = await navigator.serviceWorker.getRegistrations();
           await Promise.all(registrations.map((registration) => registration.unregister()));
+          if (navigator.serviceWorker.controller) {
+            await navigator.serviceWorker.ready.catch(() => null);
+          }
         }
 
         if ("caches" in window) {
@@ -34,6 +37,7 @@ export function ClientCacheReset() {
         if (!cancelled && !window.location.search.includes("cache-reset=done")) {
           const url = new URL(window.location.href);
           url.searchParams.set("cache-reset", "done");
+          url.searchParams.set("v", CACHE_RESET_VERSION);
           window.location.replace(url.toString());
         }
       } catch {
