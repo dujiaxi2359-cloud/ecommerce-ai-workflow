@@ -129,7 +129,7 @@ export function buildDetailImagePrompt(input: {
   subtitle: string;
   layout: string;
   language?: string;
-  textMode: "editable-layers" | "image-text";
+  textMode: "editable-layers" | "image-text" | "minimal-text";
   protection?: Partial<ProductProtectionSettings>;
 }) {
   const isChinese = input.language?.includes("中文");

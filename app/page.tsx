@@ -1,5 +1,11 @@
-"use client";
+﻿"use client";
 
+import {
+  AnimatePresence,
+  motion,
+  useMotionValue,
+  useSpring,
+} from "framer-motion";
 import {
   Download,
   FileImage,
@@ -8,11 +14,13 @@ import {
   Layers,
   Loader2,
   RefreshCw,
+  Settings,
   Sparkles,
   Upload,
   Wand2,
+  X,
 } from "lucide-react";
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildDetailPrompt,
   buildMimicPrompt,
@@ -24,12 +32,10 @@ import { getHistoryImages, saveHistoryImages } from "@/lib/client-image-store";
 import {
   detailTemplates,
   ecommercePlatforms,
-  ecommercePromptTemplates,
   mimicCounts,
   mimicDimensions,
   mimicStrengths,
   mimicTypes,
-  posterStyles,
   posterTypes,
   ratioToSize,
   platformPrompt,
@@ -41,17 +47,13 @@ import {
   type PosterStyle,
   type PosterType,
 } from "@/lib/templates";
-import { ecommerceStylePresets } from "@/lib/templates/stylePresets";
 import { platformPresets } from "@/lib/templates/platformPresets";
-import { productVariantOutputTypes, productVariantStyles } from "@/lib/templates/productVariantStyles";
+import { productVariantOutputTypes } from "@/lib/templates/productVariantStyles";
 import type { DetailBlueprintInput, DetailBlueprintItem, DetailLanguage, DetailMarket, DetailPlatform } from "@/types/detail";
 import { defaultProductProtection, type ProductProtectionLevel } from "@/types/workflow";
 import {
   qualities,
   qualityLabels,
-  ratios,
-  sizes,
-  styleLabels,
   type ImageQuality,
   type ImageSize,
   type Ratio,
@@ -59,6 +61,7 @@ import {
 } from "@/lib/workflow";
 import { loadUserApiKey, saveUserApiKey, clearUserApiKey } from "@/lib/apiKey/userApiKey";
 import { maskApiKey } from "@/lib/apiKey/maskApiKey";
+import { AigcNongLogo } from "@/components/brand/AigcNongLogo";
 import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
 import { hasFeatureAccess } from "@/lib/license/featureAccess";
 import { loadLicenseCode, saveLicenseCode } from "@/lib/license/licenseStorage";
@@ -122,6 +125,60 @@ type ServerLogEntry = {
 const historyKey = "ecommerce-image-workflow-history-v2";
 const showWorkflowInternals = true;
 const hiddenPromptText = "工作流内部提示词已隐藏。";
+
+const commercialRatioOptions: Array<{ value: Ratio; label: string }> = [
+  { value: "1:1", label: "1:1" },
+  { value: "4:5", label: "4:5" },
+  { value: "3:4", label: "3:4" },
+  { value: "9:16", label: "9:16" },
+  { value: "16:9", label: "16:9" },
+  { value: "custom", label: "自定义" },
+];
+
+const apiProviderOptions: Array<{ value: ApiProvider; label: string; desc: string }> = [
+  { value: "openai", label: "OpenAI", desc: "普通 OpenAI / 兼容接口" },
+  { value: "azure", label: "Azure OpenAI", desc: "Endpoint + Deployment" },
+  { value: "banana", label: "Banana", desc: "Banana 2 / Banana Pro" },
+];
+
+const bananaModelOptions = [
+  { value: "banana-2", label: "Banana 2" },
+  { value: "banana-pro", label: "Banana Pro" },
+];
+
+function providerDisplayName(provider: ApiProvider) {
+  return apiProviderOptions.find((item) => item.value === provider)?.label || "OpenAI";
+}
+
+function isBananaProvider(provider: ApiProvider) {
+  return provider === "banana";
+}
+
+function ratioOptions() {
+  return commercialRatioOptions;
+}
+
+function inferDetailLocaleFromPrompt(prompt: string): {
+  market?: DetailMarket;
+  language?: DetailLanguage;
+} {
+  if (/巴西|Brazil|葡萄牙语|葡语|Portuguese/i.test(prompt)) {
+    return { market: "巴西", language: "葡语（巴西）" };
+  }
+  if (/墨西哥|Mexico|西语|Spanish|Mercado Libre/i.test(prompt)) {
+    return { market: "墨西哥", language: "西语（墨西哥）" };
+  }
+  if (/中国|天猫|京东|抖音|小红书|中文/i.test(prompt)) {
+    return { market: "中国", language: "中文" };
+  }
+  if (/欧洲|EU|Ozon|WB|俄文|Russian/i.test(prompt)) {
+    return { market: "欧洲", language: "俄文" };
+  }
+  if (/美国|US|USA|Amazon|英文|English/i.test(prompt)) {
+    return { market: "美国", language: "英文" };
+  }
+  return {};
+}
 
 const emptyLicenseStatus: LicenseStatus = {
   valid: false,
@@ -225,6 +282,9 @@ function withPlatform(value: string, platform: EcommercePlatformId) {
 
 export default function Home() {
   const [hasMounted, setHasMounted] = useState(false);
+  const [hasEnteredStudio, setHasEnteredStudio] = useState(false);
+  const [isPortalTransitioning, setIsPortalTransitioning] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("text");
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -240,7 +300,7 @@ export default function Home() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [lastDurationMs, setLastDurationMs] = useState<number | null>(null);
   const [logs, setLogs] = useState<ServerLogEntry[]>([]);
-  const [showLogs, setShowLogs] = useState(true);
+  const [showLogs, setShowLogs] = useState(false);
   const [downloadingHistoryId, setDownloadingHistoryId] = useState("");
   const [licenseCode, setLicenseCode] = useState("");
   const [licenseStatus, setLicenseStatus] =
@@ -253,7 +313,7 @@ export default function Home() {
   const [azureApiVersion, setAzureApiVersion] = useState("2025-04-01-preview");
 
   const [textPrompt, setTextPrompt] = useState("");
-  const [textStyle, setTextStyle] = useState<StyleKey>("minimalEcommerce");
+  const [textStyle, setTextStyle] = useState<StyleKey>("" as StyleKey);
   const [textRatio, setTextRatio] = useState<Ratio>("1:1");
   const [textSize, setTextSize] = useState<ImageSize>("1024x1024");
   const [textQuality, setTextQuality] = useState<ImageQuality>("low");
@@ -288,9 +348,12 @@ export default function Home() {
   const [productMainThumb, setProductMainThumb] = useState("");
   const [productName, setProductName] = useState("");
   const [productCategory, setProductCategory] = useState("");
+  const [productBrand, setProductBrand] = useState("");
+  const [productSellingPoints, setProductSellingPoints] = useState("");
+  const [productSpecs, setProductSpecs] = useState("");
   const [productPrompt, setProductPrompt] = useState("");
   const [productRatio, setProductRatio] = useState<Ratio>("1:1");
-  const [productQuality, setProductQuality] = useState<ImageQuality>("low");
+  const [productQuality, setProductQuality] = useState<ImageQuality>("high");
   const [productPlatform, setProductPlatform] =
     useState<EcommercePlatformId>("general");
   const [productProtectionLevel, setProductProtectionLevel] =
@@ -301,7 +364,7 @@ export default function Home() {
   const [variantProductThumb, setVariantProductThumb] = useState("");
   const [variantPrompt, setVariantPrompt] = useState("");
   const [variantOutputType, setVariantOutputType] = useState("电商主图");
-  const [variantStyle, setVariantStyle] = useState("高级极简");
+  const [variantStyle, setVariantStyle] = useState("");
   const [variantRatio, setVariantRatio] = useState<Ratio>("1:1");
   const [variantCount, setVariantCount] = useState(1);
   const [variantQuality, setVariantQuality] = useState<ImageQuality>("low");
@@ -337,7 +400,7 @@ export default function Home() {
   const [detailLanguage, setDetailLanguage] = useState<DetailLanguage>("英文");
   const [detailWorkflowPlatform, setDetailWorkflowPlatform] =
     useState<DetailPlatform>("Amazon / 亚马逊");
-  const [detailStyle, setDetailStyle] = useState("Amazon 专业信息图风");
+  const [detailStyle, setDetailStyle] = useState("");
   const [detailTextMode, setDetailTextMode] = useState<"editable-layers" | "image-text">("editable-layers");
   const [detailBlueprints, setDetailBlueprints] = useState<DetailBlueprintItem[]>([]);
 
@@ -352,13 +415,28 @@ export default function Home() {
   const [posterSubtitle, setPosterSubtitle] = useState("");
   const [posterCampaignInfo, setPosterCampaignInfo] = useState("");
   const [posterType, setPosterType] = useState<PosterType>("上新");
-  const [posterStyle, setPosterStyle] = useState<PosterStyle>("高级感");
+  const [posterStyle, setPosterStyle] = useState<PosterStyle>("" as PosterStyle);
   const [posterRatio, setPosterRatio] = useState<Ratio>("4:5");
   const [posterQuality, setPosterQuality] = useState<ImageQuality>("low");
   const [posterPlatform, setPosterPlatform] =
     useState<EcommercePlatformId>("general");
   const [posterProtectionLevel, setPosterProtectionLevel] =
     useState<ProductProtectionLevel>("strict");
+
+  const glowX = useMotionValue(-450);
+  const glowY = useMotionValue(-450);
+  const smoothX = useSpring(glowX, { stiffness: 54, damping: 22, mass: 0.55 });
+  const smoothY = useSpring(glowY, { stiffness: 54, damping: 22, mass: 0.55 });
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      glowX.set(event.clientX - 450);
+      glowY.set(event.clientY - 450);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    return () => window.removeEventListener("pointermove", handlePointerMove);
+  }, [glowX, glowY]);
 
   const promptPreview = useMemo(() => {
     if (activeTab === "text") {
@@ -388,11 +466,14 @@ export default function Home() {
         "产品图工作流",
         `产品：${productName || "根据上传产品图判断"}`,
         `品类：${productCategory || "未填写"}`,
-        `提示词：${productPrompt || "生成干净高级的电商产品展示图，只改变背景、光影和排版。"}`,
+        productBrand ? `品牌：${productBrand}` : "",
+        productSellingPoints ? `卖点：${productSellingPoints}` : "",
+        productSpecs ? `参数：${productSpecs}` : "",
+        `提示词：${productPrompt || "按用户填写的视觉方向生成背景、场景、光影和版式，不改变产品本体。"}`,
         "仅锁定产品图主体，背景和视觉效果按提示词生成。",
         `保护等级：${productProtectionLevel}`,
         platformPrompt(productPlatform),
-      ].join("\n");
+      ].filter(Boolean).join("\n");
     }
 
     if (activeTab === "variant") {
@@ -442,6 +523,9 @@ export default function Home() {
     mimicPlatform,
     productName,
     productCategory,
+    productBrand,
+    productSellingPoints,
+    productSpecs,
     productPrompt,
     productProtectionLevel,
     productPlatform,
@@ -465,59 +549,28 @@ export default function Home() {
     posterPlatform,
   ]);
 
-  const syncLocalHistoryToServer = useCallback(async (items: HistoryItem[], activeLicenseCode: string) => {
-    const customerId = normalizeClientLicenseCode(activeLicenseCode);
-    if (!customerId) return;
-
-    for (const item of items.slice(0, 40)) {
-      try {
-        const itemWithCustomer = { ...item, customerId };
-        const itemImages = await getHistoryImages(itemWithCustomer.id);
-        if (!itemImages?.length) continue;
-
-        await fetch("/api/history", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            item: itemWithCustomer,
-            images: itemImages,
-            licenseCode: customerId,
-          }),
-        });
-      } catch {
-        // Local history sync is best-effort; generation and downloads still work.
-      }
-    }
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      if (cancelled) return;
-
-      setHasMounted(true);
-      const storedLicense = loadLicenseCode();
-      const storedApiKey = loadUserApiKey();
-      setLicenseCode(storedLicense);
-      setLicenseStatus(emptyLicenseStatus);
-      if (storedLicense) {
-        verifyLicenseOnServer(storedLicense).then((next) => {
-          if (!cancelled) {
-            setLicenseStatus(next);
-          }
-        });
-      }
-      setUserApiKey(storedApiKey.apiKey);
-      setUserBaseURL(storedApiKey.baseURL || "");
-      setApiProvider(storedApiKey.provider || "openai");
-      setAzureEndpoint(storedApiKey.azureEndpoint || "");
-      setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
-      setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
-    }, 0);
-
+    setHasMounted(true);
+    const storedLicense = loadLicenseCode();
+    const storedApiKey = loadUserApiKey();
+    setLicenseCode(storedLicense);
+    setLicenseStatus(emptyLicenseStatus);
+    if (storedLicense) {
+      verifyLicenseOnServer(storedLicense).then((next) => {
+        if (!cancelled) {
+          setLicenseStatus(next);
+        }
+      });
+    }
+    setUserApiKey(storedApiKey.apiKey);
+    setUserBaseURL(storedApiKey.baseURL || "");
+    setApiProvider(storedApiKey.provider || "openai");
+    setAzureEndpoint(storedApiKey.azureEndpoint || "");
+    setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
+    setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
   }, []);
 
@@ -527,50 +580,42 @@ export default function Home() {
     let cancelled = false;
     const activeLicenseCode = licenseStatus.valid ? licenseStatus.code : "";
     const currentHistoryKey = historyStorageKeyForLicense(activeLicenseCode);
-    const historyApiKey = licenseStatus.valid && licenseStatus.planId === "studio" ? "adminCode" : "licenseCode";
-    const historyApiUrl = activeLicenseCode
-      ? `/api/history?${historyApiKey}=${encodeURIComponent(normalizeClientLicenseCode(activeLicenseCode))}`
-      : "/api/history";
+    let localHistory: HistoryItem[] = [];
 
-    const timer = window.setTimeout(() => {
-      let localHistory: HistoryItem[] = [];
-
-      const raw = localStorage.getItem(currentHistoryKey);
-      if (raw) {
-        try {
-          localHistory = JSON.parse(raw) as HistoryItem[];
-          setHistory(localHistory);
-        } catch {
-          localStorage.removeItem(currentHistoryKey);
-        }
-      } else {
-        setHistory([]);
+    const raw = localStorage.getItem(currentHistoryKey);
+    if (raw) {
+      try {
+        localHistory = JSON.parse(raw) as HistoryItem[];
+        setHistory(localHistory);
+      } catch {
+        localStorage.removeItem(currentHistoryKey);
       }
+    } else {
+      setHistory([]);
+    }
 
-      fetch(historyApiUrl, { cache: "no-store" })
-        .then((response) => response.json())
-        .then((payload) => {
-          if (cancelled) return;
-          const sharedHistory = (payload.history || []) as HistoryItem[];
-          const merged = mergeHistory(sharedHistory, localHistory);
-          setHistory(merged);
-          localStorage.setItem(currentHistoryKey, JSON.stringify(merged));
-          syncLocalHistoryToServer(localHistory, activeLicenseCode);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          if (localHistory.length) {
-            setHistory(localHistory);
-          }
-          syncLocalHistoryToServer(localHistory, activeLicenseCode);
-        });
-    }, 0);
+    fetch(historyApiUrlForLicense(activeLicenseCode, licenseStatus), { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (cancelled) return;
+        const sharedHistory = (payload.history || []) as HistoryItem[];
+        const merged = mergeHistory(sharedHistory, localHistory);
+        setHistory(merged);
+        localStorage.setItem(currentHistoryKey, JSON.stringify(merged));
+        syncLocalHistoryToServer(localHistory, activeLicenseCode);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (localHistory.length) {
+          setHistory(localHistory);
+        }
+        syncLocalHistoryToServer(localHistory, activeLicenseCode);
+      });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
     };
-  }, [hasMounted, licenseStatus.code, licenseStatus.valid, licenseStatus.planId, syncLocalHistoryToServer]);
+  }, [hasMounted, licenseStatus.code, licenseStatus.valid, licenseStatus.planId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -689,7 +734,7 @@ export default function Home() {
 
   function saveApiKeyConfig() {
     if (!userApiKey.trim()) {
-      setError("请填写你自己的 OpenAI API Key。");
+      setError("请在设置中心填写 API Key。");
       return;
     }
 
@@ -699,7 +744,7 @@ export default function Home() {
     }
 
     if (apiProvider === "azure" && isAzureEndpoint(azureEndpoint) && !azureDeployment.trim()) {
-      setError("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
+      setError("Azure OpenAI 需要填写 Deployment，例如 gpt-image-2。");
       return;
     }
 
@@ -726,7 +771,7 @@ export default function Home() {
     }
 
     if (requireApiKey && !userApiKey.trim()) {
-      setError("请先填写客户自己的 OpenAI API Key。");
+      setError("请先在设置中心填写 API Key。");
       return false;
     }
 
@@ -736,7 +781,7 @@ export default function Home() {
     }
 
     if (requireApiKey && apiProvider === "azure" && isAzureEndpoint(azureEndpoint) && !azureDeployment.trim()) {
-      setError("客户 Azure 模式需要填写 Deployment，例如 gpt-image-2。");
+      setError("Azure OpenAI 需要填写 Deployment，例如 gpt-image-2。");
       return false;
     }
 
@@ -756,7 +801,14 @@ export default function Home() {
       const response = await fetch("/api/optimize-prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: textPrompt }),
+        body: JSON.stringify({
+          prompt: textPrompt,
+          workflowType: activeTab,
+          platform: textPlatform,
+          ratio: textRatio,
+          useCase: "text-to-image",
+          style: textStyle,
+        }),
       });
       const payload = await response.json();
       setTextPrompt(payload.prompt || textPrompt);
@@ -806,6 +858,31 @@ export default function Home() {
     }
   }
 
+  async function syncLocalHistoryToServer(items: HistoryItem[], activeLicenseCode: string) {
+    const customerId = normalizeClientLicenseCode(activeLicenseCode);
+    if (!customerId) return;
+
+    for (const item of items.slice(0, 40)) {
+      try {
+        const itemWithCustomer = { ...item, customerId };
+        const itemImages = await getHistoryImages(itemWithCustomer.id);
+        if (!itemImages?.length) continue;
+
+        await fetch("/api/history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            item: itemWithCustomer,
+            images: itemImages,
+            licenseCode: customerId,
+          }),
+        });
+      } catch {
+        // Local history sync is best-effort; generation and downloads still work.
+      }
+    }
+  }
+
   async function generateText() {
     if (!textPrompt.trim()) {
       setError("请输入 prompt，或从模板库选择一个。");
@@ -823,7 +900,7 @@ export default function Home() {
     await submitGeneration("/api/generate-image", formData, {
       workflow: "文本生图",
       title: textPrompt,
-      outputType: styleLabels[textStyle],
+      outputType: textStyle || "视觉方向",
     });
   }
 
@@ -838,7 +915,8 @@ export default function Home() {
     formData.append("productImage", mimicProduct);
     formData.append("productName", mimicProductName);
     formData.append("sellingPoints", mimicSellingPoints);
-    formData.append("extraRequirements", withPlatform(mimicExtra, mimicPlatform));
+    formData.append("extraRequirements", mimicExtra);
+    formData.append("platform", mimicPlatform);
     formData.append("outputType", mimicType);
     formData.append("dimensions", mimicSelectedDimensions.join(","));
     formData.append("strength", mimicStrength);
@@ -863,10 +941,19 @@ export default function Home() {
     }
 
     const formData = new FormData();
+    const productWorkflowPrompt = [
+      productSellingPoints ? `核心卖点：${productSellingPoints}` : "",
+      productSpecs ? `产品参数：${productSpecs}` : "",
+      productPrompt ? `视觉方向：${productPrompt}` : "",
+    ].filter(Boolean).join("\n");
+
     formData.append("productImage", productMain);
     formData.append("productName", productName);
     formData.append("category", productCategory);
-    formData.append("prompt", productPrompt);
+    formData.append("brandName", productBrand);
+    formData.append("sellingPoints", productSellingPoints);
+    formData.append("parameters", productSpecs);
+    formData.append("prompt", productWorkflowPrompt || productPrompt);
     formData.append("ratio", productRatio);
     formData.append("quality", productQuality);
     formData.append("count", "1");
@@ -875,7 +962,7 @@ export default function Home() {
 
     await submitGeneration("/api/product-workflow", formData, {
       workflow: "产品图工作流",
-      title: productName || productPrompt || "产品图工作流",
+      title: productName || productSellingPoints || productPrompt || "产品图工作流",
       outputType: "产品锁定生图",
       productThumb: productMainThumb,
     });
@@ -907,6 +994,9 @@ export default function Home() {
   }
 
   function detailInput(): DetailBlueprintInput {
+    const inferredLocale = inferDetailLocaleFromPrompt(
+      [detailVisualPrompt, detailStyle, detailSellingPoints, detailWorkflowPlatform].join("\n"),
+    );
     return {
       productName: detailProductName,
       category: detailCategory,
@@ -923,8 +1013,8 @@ export default function Home() {
       variants: "",
       afterSales: detailAfterSales,
       visualPrompt: detailVisualPrompt,
-      targetMarket: detailMarket,
-      language: detailLanguage,
+      targetMarket: inferredLocale.market || detailMarket,
+      language: inferredLocale.language || detailLanguage,
       platform: detailWorkflowPlatform,
       count: detailSetCount,
       style: detailStyle,
@@ -1279,6 +1369,542 @@ export default function Home() {
     return generatePoster();
   }
 
+  function enterStudio(tab: TabKey) {
+    if (isPortalTransitioning) return;
+    setActiveTab(tab);
+    setIsPortalTransitioning(true);
+    window.setTimeout(() => {
+      setHasEnteredStudio(true);
+      setIsPortalTransitioning(false);
+    }, 620);
+  }
+
+  const flagshipModes: Array<{ tab: TabKey; label: string; short: string }> = [
+    { tab: "text", label: "文本生图", short: "Prompt" },
+    { tab: "mimic", label: "参考模仿", short: "Mimic" },
+    { tab: "product", label: "产品图流", short: "Product" },
+    { tab: "variant", label: "风格变体", short: "Variant" },
+    { tab: "detail", label: "详情套图", short: "Suite" },
+    { tab: "poster", label: "海报流", short: "Poster" },
+  ];
+
+  if (!hasMounted) {
+    return (
+      <main className="studio-shell flex min-h-screen items-center justify-center">
+        <div className="studio-card px-6 py-5 text-sm text-zinc-400">
+          AIGC DESIGN STUDIO loading...
+        </div>
+      </main>
+    );
+  }
+
+  if (!hasEnteredStudio) {
+    return (
+      <main className={`studio-shell relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#030305] px-6 text-zinc-400 ${isPortalTransitioning ? "studio-hub-exiting" : ""}`}>
+        <div className="noise absolute inset-0 z-50 opacity-[0.03] pointer-events-none" />
+        <motion.div
+          className="absolute inset-0 z-0 pointer-events-none"
+          style={{ x: smoothX, y: smoothY }}
+        >
+          <div className="h-[900px] w-[900px] rounded-full bg-indigo-600/10 blur-[120px]" />
+        </motion.div>
+        <div className="studio-hub-orb studio-hub-orb-a" />
+        <div className="studio-hub-orb studio-hub-orb-b" />
+        <div className="studio-hub-ring" />
+        <div className="studio-hub-sheen" />
+        <section className="relative z-10 w-full max-w-6xl text-center">
+          <AigcNongLogo variant="hub" className="mx-auto mb-10" />
+          <h1 className="studio-launch-title text-5xl font-bold text-white sm:text-7xl">
+            今天要做点什么？
+          </h1>
+          <p className="studio-launch-copy mx-auto mt-5 max-w-2xl text-sm text-zinc-400">
+            选择你的创作模式，进入专业级 AIGC 图片工作流。
+          </p>
+          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { tab: "product" as TabKey, title: "产品图工作流", desc: "Product Workflow" },
+              { tab: "detail" as TabKey, title: "详情图套图", desc: "Detail Suite" },
+              { tab: "poster" as TabKey, title: "海报工作流", desc: "Poster Flow" },
+              { tab: "mimic" as TabKey, title: "参考图模仿", desc: "Reference Mimic" },
+              { tab: "variant" as TabKey, title: "产品风格变体", desc: "Style Variation" },
+              { tab: "text" as TabKey, title: "文本生图", desc: "Prompt to Image" },
+            ].map((item, index) => (
+              <button
+                key={item.tab}
+                className="studio-launch-card group text-left"
+                style={{ animationDelay: `${260 + index * 70}ms` }}
+                onClick={() => enterStudio(item.tab)}
+              >
+                <span className="studio-launch-icon relative z-10 mb-8 inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-200 ring-1 ring-indigo-300/20 transition group-hover:bg-indigo-500/25">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <span className="relative z-10 block text-[15px] font-bold text-zinc-100">{item.title}</span>
+                <span className="relative z-10 mt-2 block text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-500">
+                  {item.desc}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <div className="studio-shell relative h-screen w-screen overflow-hidden bg-[#030305] text-zinc-400">
+      <div className="noise absolute inset-0 z-50 opacity-[0.03] pointer-events-none" />
+      <motion.div
+        className="absolute inset-0 z-0 pointer-events-none"
+        style={{ x: smoothX, y: smoothY }}
+      >
+        <div className="h-[900px] w-[900px] rounded-full bg-indigo-600/10 blur-[120px]" />
+      </motion.div>
+
+      <div className="relative z-10 flex h-full w-full">
+        <aside className="flex h-full w-[420px] shrink-0 flex-col border-r border-white/5 bg-black/40 p-8 backdrop-blur-3xl">
+          <div className="mb-10 flex items-center justify-between gap-4 border-b border-white/5 pb-8">
+            <button className="text-left" onClick={() => setHasEnteredStudio(false)} aria-label="返回启动页">
+              <AigcNongLogo variant="sidebar" />
+            </button>
+              <span className={`studio-status ${licenseStatus.valid ? "studio-status-ok" : "studio-status-warn"}`}>
+                {licenseStatus.valid ? "已授权" : "待授权"}
+              </span>
+          </div>
+
+          <div className="mb-10 grid grid-cols-2 gap-3">
+              {flagshipModes.map((workflow) => {
+                const locked = !hasFeatureAccess(licenseStatus, tabFeatureMap[workflow.tab]);
+                return (
+                  <button
+                    key={workflow.tab}
+                    className={`p-4 rounded-2xl border transition-all text-left text-[11px] ${
+                      activeTab === workflow.tab
+                        ? "border-indigo-500 bg-indigo-500/10 text-white shadow-[0_0_30px_rgba(99,102,241,0.18)]"
+                        : "border-white/5 bg-white/5 text-zinc-400 hover:border-white/15 hover:bg-white/[0.07]"
+                    }`}
+                    onClick={() => setActiveTab(workflow.tab)}
+                    title={locked ? "当前授权未开放该工作流" : workflow.short}
+                  >
+                    <span className="block font-bold">{workflow.label}</span>
+                    <span className="mt-1 block text-[9px] uppercase tracking-[0.18em] text-zinc-500">
+                      {locked ? "Locked" : workflow.short}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+          <div className="no-scrollbar flex-1 space-y-6 overflow-y-auto pb-20">
+              {activeTab === "text" && (
+                <TextWorkflow
+                  prompt={textPrompt}
+                  setPrompt={setTextPrompt}
+                  style={textStyle}
+                  setStyle={setTextStyle}
+                  ratio={textRatio}
+                  setRatio={setTextRatio}
+                  size={textSize}
+                  setSize={setTextSize}
+                  quality={textQuality}
+                  setQuality={setTextQuality}
+                  platform={textPlatform}
+                  setPlatform={setTextPlatform}
+                  count={textCount}
+                  setCount={setTextCount}
+                  optimize={optimizeTextPrompt}
+                  isOptimizing={isOptimizing}
+                />
+              )}
+              {activeTab === "mimic" && (
+                <MimicWorkflow
+                  reference={mimicReference}
+                  setReference={setMimicReference}
+                  product={mimicProduct}
+                  setProduct={setMimicProduct}
+                  referencePreview={mimicReferencePreview}
+                  productPreview={mimicProductPreview}
+                  productName={mimicProductName}
+                  setProductName={setMimicProductName}
+                  sellingPoints={mimicSellingPoints}
+                  setSellingPoints={setMimicSellingPoints}
+                  extra={mimicExtra}
+                  setExtra={setMimicExtra}
+                  outputType={mimicType}
+                  setOutputType={setMimicType}
+                  dimensions={mimicSelectedDimensions}
+                  setDimensions={setMimicSelectedDimensions}
+                  strength={mimicStrength}
+                  setStrength={setMimicStrength}
+                  ratio={mimicRatio}
+                  setRatio={setMimicRatio}
+                  count={mimicCount}
+                  setCount={setMimicCount}
+                  quality={mimicQuality}
+                  setQuality={setMimicQuality}
+                  platform={mimicPlatform}
+                  setPlatform={setMimicPlatform}
+                  protectionLevel={mimicProtectionLevel}
+                  setProtectionLevel={setMimicProtectionLevel}
+                />
+              )}
+              {activeTab === "product" && (
+                <ProductWorkflow
+                  product={productMain}
+                  setProduct={setProductMain}
+                  productPreview={productMainPreview}
+                  productName={productName}
+                  setProductName={setProductName}
+                  category={productCategory}
+                  setCategory={setProductCategory}
+                  brand={productBrand}
+                  setBrand={setProductBrand}
+                  sellingPoints={productSellingPoints}
+                  setSellingPoints={setProductSellingPoints}
+                  specs={productSpecs}
+                  setSpecs={setProductSpecs}
+                  prompt={productPrompt}
+                  setPrompt={setProductPrompt}
+                  ratio={productRatio}
+                  setRatio={setProductRatio}
+                  quality={productQuality}
+                  setQuality={setProductQuality}
+                  platform={productPlatform}
+                  setPlatform={setProductPlatform}
+                  protectionLevel={productProtectionLevel}
+                  setProtectionLevel={setProductProtectionLevel}
+                />
+              )}
+              {activeTab === "variant" && (
+                <ProductVariantWorkflow
+                  product={variantProduct}
+                  setProduct={setVariantProduct}
+                  productPreview={variantProductPreview}
+                  prompt={variantPrompt}
+                  setPrompt={setVariantPrompt}
+                  outputType={variantOutputType}
+                  setOutputType={setVariantOutputType}
+                  style={variantStyle}
+                  setStyle={setVariantStyle}
+                  ratio={variantRatio}
+                  setRatio={setVariantRatio}
+                  count={variantCount}
+                  setCount={setVariantCount}
+                  quality={variantQuality}
+                  setQuality={setVariantQuality}
+                  platform={variantPlatform}
+                  setPlatform={setVariantPlatform}
+                  protectionLevel={variantProtectionLevel}
+                  setProtectionLevel={setVariantProtectionLevel}
+                />
+              )}
+              {activeTab === "detail" && (
+                <DetailSuiteWorkflow
+                  product={detailProduct}
+                  setProduct={setDetailProduct}
+                  productPreview={detailProductPreview}
+                  productName={detailProductName}
+                  setProductName={setDetailProductName}
+                  category={detailCategory}
+                  setCategory={setDetailCategory}
+                  brand={detailBrand}
+                  setBrand={setDetailBrand}
+                  sellingPoints={detailSellingPoints}
+                  setSellingPoints={setDetailSellingPoints}
+                  specs={detailSpecs}
+                  setSpecs={setDetailSpecs}
+                  material={detailMaterial}
+                  setMaterial={setDetailMaterial}
+                  functions={detailFunctions}
+                  setFunctions={setDetailFunctions}
+                  packageList={detailPackageList}
+                  setPackageList={setDetailPackageList}
+                  useScenes={detailUseScenes}
+                  setUseScenes={setDetailUseScenes}
+                  audience={detailAudience}
+                  setAudience={setDetailAudience}
+                  afterSales={detailAfterSales}
+                  setAfterSales={setDetailAfterSales}
+                  visualPrompt={detailVisualPrompt}
+                  setVisualPrompt={setDetailVisualPrompt}
+                  step={detailStep}
+                  setStep={setDetailStep}
+                  count={detailSetCount}
+                  setCount={setDetailSetCount}
+                  market={detailMarket}
+                  setMarket={setDetailMarket}
+                  language={detailLanguage}
+                  setLanguage={setDetailLanguage}
+                  workflowPlatform={detailWorkflowPlatform}
+                  setWorkflowPlatform={setDetailWorkflowPlatform}
+                  style={detailStyle}
+                  setStyle={setDetailStyle}
+                  ratio={detailRatio}
+                  setRatio={setDetailRatio}
+                  quality={detailQuality}
+                  setQuality={setDetailQuality}
+                  textMode={detailTextMode}
+                  setTextMode={setDetailTextMode}
+                  blueprints={detailBlueprints}
+                  updateBlueprint={updateDetailBlueprint}
+                  generateBlueprints={generateDetailBlueprints}
+                  generateBatch={generateDetailBatch}
+                />
+              )}
+              {activeTab === "poster" && (
+                <PosterWorkflow
+                  product={posterProduct}
+                  setProduct={setPosterProduct}
+                  logo={posterLogo}
+                  setLogo={setPosterLogo}
+                  productPreview={posterProductPreview}
+                  logoPreview={posterLogoPreview}
+                  productName={posterProductName}
+                  setProductName={setPosterProductName}
+                  title={posterTitle}
+                  setTitle={setPosterTitle}
+                  subtitle={posterSubtitle}
+                  setSubtitle={setPosterSubtitle}
+                  campaignInfo={posterCampaignInfo}
+                  setCampaignInfo={setPosterCampaignInfo}
+                  posterType={posterType}
+                  setPosterType={setPosterType}
+                  posterStyle={posterStyle}
+                  setPosterStyle={setPosterStyle}
+                  ratio={posterRatio}
+                  setRatio={setPosterRatio}
+                  quality={posterQuality}
+                  setQuality={setPosterQuality}
+                  platform={posterPlatform}
+                  setPlatform={setPosterPlatform}
+                  protectionLevel={posterProtectionLevel}
+                  setProtectionLevel={setPosterProtectionLevel}
+                />
+              )}
+              {error && <div className="studio-error">{error}</div>}
+              {status && <div className="studio-success">{status}</div>}
+            </div>
+
+          <div className="studio-sidebar-action border-t border-white/[0.06] p-6">
+            <button className="studio-primary-button w-full" onClick={runCurrentTab} disabled={isGenerating}>
+              {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+              {activeTab === "detail" ? "执行详情图套图" : "执行生图蓝图"}
+            </button>
+            <p className="mt-3 text-center text-[11px] text-zinc-600">
+              {isGenerating
+                ? `生成中 ${formatDuration(elapsedMs)}`
+                : lastDurationMs !== null
+                  ? `上次耗时 ${formatDuration(lastDurationMs)}`
+                  : "生成耗时会在这里显示"}
+            </p>
+          </div>
+        </aside>
+
+        <section className="dot-grid relative flex min-h-0 flex-1 flex-col">
+          <header className="flex h-[74px] items-center justify-between border-b border-white/[0.06] px-8">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-zinc-600">
+                Workspace / {tabTitle(activeTab)} / Preview
+              </p>
+              <h1 className="mt-1 text-xl font-semibold text-white">{tabTitle(activeTab)}</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`studio-api-badge ${userApiKey || azureEndpoint ? "studio-api-ok" : "studio-api-missing"}`}>
+                {userApiKey || azureEndpoint ? `${providerDisplayName(apiProvider)} 已配置` : "API 未配置"}
+              </span>
+              <button className="studio-secondary-button" onClick={downloadAll} disabled={images.length === 0}>
+                <Download className="h-4 w-4" />
+                下载全部
+              </button>
+              <button className="studio-icon-button" onClick={() => setShowSettings(true)} title="设置中心">
+                <Settings className="h-5 w-5" />
+              </button>
+            </div>
+          </header>
+
+          <div className="flex-1 overflow-y-auto p-8">
+            <div className="studio-preview-frame">
+              {images.length ? (
+                <div className="grid w-full gap-5 md:grid-cols-2 xl:grid-cols-3">
+                  {images.map((image, index) => (
+                    <figure key={image.id} className="studio-result-card group">
+                      <img src={image.url} alt={`Generated result ${index + 1}`} className="h-full w-full rounded-[48px] object-contain" />
+                      <figcaption className="absolute left-4 top-4 rounded-full bg-black/55 px-3 py-1 text-[10px] font-bold text-white/80 backdrop-blur">
+                        #{index + 1}
+                      </figcaption>
+                      <figcaption className="absolute bottom-4 left-4 right-4 rounded-[22px] border border-white/[0.08] bg-black/55 px-4 py-3 text-[11px] font-bold uppercase tracking-[0.22em] text-indigo-200 backdrop-blur-xl">
+                        商业渲染状态 / {isGenerating ? "Loading" : "Done"}
+                      </figcaption>
+                      <button
+                        className="studio-floating-action opacity-0 group-hover:opacity-100"
+                        onClick={() => downloadImage(image.url, `aigc-studio-${image.id}.png`)}
+                        title="下载单张"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                    </figure>
+                  ))}
+                </div>
+              ) : (
+                <div className="studio-card flex max-w-lg flex-col items-center rounded-[36px] px-10 py-9 text-center">
+                  <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-[28px] border border-indigo-300/20 bg-indigo-500/10 text-indigo-200 shadow-[0_0_70px_rgba(99,102,241,0.18)]">
+                    {isGenerating ? <Loader2 className="h-8 w-8 animate-spin" /> : <Layers className="h-8 w-8" />}
+                  </div>
+                  <h2 className="text-xl font-bold text-zinc-100">
+                    {isGenerating ? "正在生成" : "准备开始创作"}
+                  </h2>
+                  <p className="mt-3 rounded-full border border-white/[0.06] bg-white/[0.035] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-200">
+                    商业渲染状态 / {isGenerating ? "Loading" : images.length ? "Done" : "Standby"}
+                  </p>
+                  <p className="mt-3 max-w-md text-sm leading-7 text-zinc-400">
+                    {isGenerating
+                      ? `模型正在执行工作流，已耗时 ${formatDuration(elapsedMs)}。`
+                      : "选择工作流并填写核心信息，生成结果将在这里呈现。"}
+                  </p>
+                  {!isGenerating && (
+                    <div className="mt-5 grid gap-2 text-left sm:grid-cols-3">
+                      {["上传产品图", "填写提示词", "点击生成"].map((step, index) => (
+                        <span key={step} className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-xs font-semibold text-zinc-300">
+                          <span className="mr-2 text-indigo-300">0{index + 1}</span>
+                          {step}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {!isGenerating && (
+                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      {["Amazon 主图", "详情图套图", "小红书封面", "产品海报"].map((tag) => (
+                        <span key={tag} className="studio-mini-button">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {showWorkflowInternals && (
+            <details className="border-t border-white/[0.06] bg-black/25 px-8 py-4">
+              <summary className="cursor-pointer text-sm font-medium text-zinc-300">
+                最终增强 Prompt
+              </summary>
+              <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/[0.06] bg-white/[0.025] p-4 text-xs leading-6 text-zinc-400">
+                {finalPrompt || promptPreview || "生成前会在这里显示系统增强后的 prompt。"}
+              </pre>
+            </details>
+          )}
+        </section>
+
+        <aside className="studio-history flex min-h-0 flex-col">
+          <div className="border-b border-white/[0.06] px-6 py-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <History className="h-4 w-4 text-zinc-500" />
+                <h2 className="text-[17px] font-semibold text-zinc-100">历史资产库</h2>
+              </div>
+              <span className="text-sm text-zinc-500">{history.length}</span>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 no-scrollbar">
+            {history.length ? (
+              history.map((item) => (
+                <article key={item.id} className="studio-history-card group">
+                  <div className="mb-3 grid grid-cols-2 gap-2">
+                    {item.referenceThumb && <img src={item.referenceThumb} alt="Reference thumbnail" className="studio-history-thumb" />}
+                    {item.productThumb && <img src={item.productThumb} alt="Product thumbnail" className="studio-history-thumb" />}
+                    {!item.referenceThumb && !item.productThumb && (
+                      <div className="studio-history-thumb flex items-center justify-center">
+                        <FileImage className="h-5 w-5 text-zinc-600" />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-white">{item.workflow}</p>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500">{item.title}</p>
+                  <p className="mt-2 text-[10px] uppercase tracking-[0.14em] text-zinc-700">
+                    {item.outputType || "Image"} / {new Date(item.createdAt).toLocaleString()}
+                  </p>
+                  <div className="mt-3 flex gap-2">
+                    {showWorkflowInternals && (
+                      <button className="studio-mini-button" onClick={() => setFinalPrompt(item.finalPrompt)}>
+                        Prompt
+                      </button>
+                    )}
+                    <button className="studio-mini-button flex-1" onClick={() => downloadHistoryImages(item)} disabled={downloadingHistoryId === item.id}>
+                      {downloadingHistoryId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                      下载{item.imageCount ? `(${item.imageCount})` : ""}
+                    </button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="studio-empty-history">
+                <FileImage className="mx-auto mb-3 h-6 w-6 text-zinc-600" />
+                <p className="text-sm font-medium text-zinc-400">暂无历史资产</p>
+                <p className="mt-2 text-xs leading-6 text-zinc-600">生成后会保存缩略图、工作流、Prompt 和下载数据。</p>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
+
+      <AnimatePresence>
+        {showSettings && (
+        <motion.div
+          className="studio-settings-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.section
+            className="studio-settings-panel"
+            initial={{ opacity: 0, y: 20, scale: 0.96, filter: "blur(14px)" }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 16, scale: 0.98, filter: "blur(12px)" }}
+            transition={{ type: "spring", stiffness: 260, damping: 28 }}
+          >
+            <div className="mb-7 flex items-start justify-between gap-6">
+              <div>
+                <AigcNongLogo variant="compact" className="mb-6" />
+                <p className="label">Settings Center</p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">授权与模型接口</h2>
+                <p className="mt-2 text-sm text-zinc-500">API Key、授权码、模型配置和开发者日志都集中在这里。</p>
+              </div>
+              <button className="studio-icon-button" onClick={() => setShowSettings(false)}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <CustomerApiAccessPanel
+              licenseCode={licenseCode}
+              setLicenseCode={setLicenseCode}
+              licenseStatus={licenseStatus}
+              activateLicense={activateLicense}
+              apiProvider={apiProvider}
+              setApiProvider={setApiProvider}
+              apiKey={userApiKey}
+              setApiKey={setUserApiKey}
+              baseURL={userBaseURL}
+              setBaseURL={setUserBaseURL}
+              azureEndpoint={azureEndpoint}
+              setAzureEndpoint={setAzureEndpoint}
+              azureDeployment={azureDeployment}
+              setAzureDeployment={setAzureDeployment}
+              azureApiVersion={azureApiVersion}
+              setAzureApiVersion={setAzureApiVersion}
+              saveApiKey={saveApiKeyConfig}
+              clearApiKey={clearApiKeyConfig}
+              logs={logs}
+              showLogs={showLogs}
+              setShowLogs={setShowLogs}
+              clearLogs={clearLogs}
+            />
+          </motion.section>
+        </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+
   if (!hasMounted) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-[1500px] items-center justify-center px-4 py-5 sm:px-6 lg:px-8">
@@ -1328,6 +1954,10 @@ export default function Home() {
             setAzureApiVersion={setAzureApiVersion}
             saveApiKey={saveApiKeyConfig}
             clearApiKey={clearApiKeyConfig}
+            logs={logs}
+            showLogs={showLogs}
+            setShowLogs={setShowLogs}
+            clearLogs={clearLogs}
           />
 
           <div className="grid grid-cols-2 gap-1 border border-line bg-paper p-1">
@@ -1413,6 +2043,12 @@ export default function Home() {
                 setProductName={setProductName}
                 category={productCategory}
                 setCategory={setProductCategory}
+                brand={productBrand}
+                setBrand={setProductBrand}
+                sellingPoints={productSellingPoints}
+                setSellingPoints={setProductSellingPoints}
+                specs={productSpecs}
+                setSpecs={setProductSpecs}
                 prompt={productPrompt}
                 setPrompt={setProductPrompt}
                 ratio={productRatio}
@@ -1778,6 +2414,24 @@ export default function Home() {
   );
 }
 
+function MouseGlow() {
+  const glowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      if (!glowRef.current) return;
+      glowRef.current.style.transform = `translate3d(${event.clientX - 380}px, ${
+        event.clientY - 380
+      }px, 0)`;
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    return () => window.removeEventListener("mousemove", handleMove);
+  }, []);
+
+  return <div ref={glowRef} className="studio-glow" aria-hidden="true" />;
+}
+
 function CustomerApiAccessPanel({
   licenseCode,
   setLicenseCode,
@@ -1797,6 +2451,10 @@ function CustomerApiAccessPanel({
   setAzureApiVersion,
   saveApiKey,
   clearApiKey,
+  logs,
+  showLogs,
+  setShowLogs,
+  clearLogs,
 }: {
   licenseCode: string;
   setLicenseCode: (value: string) => void;
@@ -1816,102 +2474,188 @@ function CustomerApiAccessPanel({
   setAzureApiVersion: (value: string) => void;
   saveApiKey: () => void;
   clearApiKey: () => void;
+  logs: ServerLogEntry[];
+  showLogs: boolean;
+  setShowLogs: (value: boolean) => void;
+  clearLogs: () => void | Promise<void>;
 }) {
   return (
-    <div className="mb-4 space-y-3 border border-line bg-paper p-3">
-      <div>
-        <p className="label">工具权限</p>
-        <div className="mt-2 flex gap-2">
+    <div className="space-y-5">
+      <section className="rounded-[28px] border border-white/[0.06] bg-white/[0.025] p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="label">授权</p>
+            <h3 className="mt-1 text-base font-semibold text-white">License</h3>
+          </div>
+          <span className={`studio-status ${licenseStatus.valid ? "studio-status-ok" : "studio-status-warn"}`}>
+            {licenseStatus.valid ? `${licenseStatus.planId?.toUpperCase() || "PRO"} 已激活` : "未激活"}
+          </span>
+        </div>
+        <div className="flex gap-2">
           <input
-            className="min-w-0 flex-1 border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+            className="control min-w-0 flex-1"
             value={licenseCode}
             onChange={(event) => setLicenseCode(event.target.value)}
             placeholder="输入授权码，例如 STUDIO-2026"
           />
-          <button className="border border-line bg-ink px-3 py-2 text-sm text-white" onClick={activateLicense}>
+          <button className="studio-secondary-button px-4" onClick={activateLicense}>
             激活
           </button>
         </div>
-        <p className={`mt-2 text-xs ${licenseStatus.valid ? "text-green-700" : "text-neutral-500"}`}>
-          {licenseStatus.valid ? `${licenseStatus.planId?.toUpperCase()} 已激活` : "当前未激活授权码"}
+        <p className="mt-3 text-xs leading-5 text-zinc-500">
+          {licenseStatus.message || "授权信息只用于打开对应工作流权限。"}
         </p>
-      </div>
+      </section>
 
-      <div>
-        <p className="label">接口类型</p>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            className={`border border-line px-3 py-2 text-sm ${apiProvider === "azure" ? "bg-ink text-white" : "bg-white text-ink"}`}
-            onClick={() => setApiProvider("azure")}
-          >
-            客户 Azure
-          </button>
-          <button
-            type="button"
-            className={`border border-line px-3 py-2 text-sm ${apiProvider === "openai" ? "bg-ink text-white" : "bg-white text-ink"}`}
-            onClick={() => setApiProvider("openai")}
-          >
-            客户 OpenAI
-          </button>
+      <section className="rounded-[28px] border border-white/[0.06] bg-white/[0.025] p-5">
+        <p className="label">模型接口</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {apiProviderOptions.map((provider) => (
+            <button
+              key={provider.value}
+              type="button"
+              className={`studio-mode-card min-h-[68px] ${apiProvider === provider.value ? "studio-mode-card-active" : ""}`}
+              onClick={() => {
+                setApiProvider(provider.value);
+                if (provider.value === "banana" && !bananaModelOptions.some((item) => item.value === azureDeployment)) {
+                  setAzureDeployment("banana-pro");
+                }
+                if (provider.value === "openai" && bananaModelOptions.some((item) => item.value === azureDeployment)) {
+                  setAzureDeployment("gpt-image-2");
+                }
+              }}
+            >
+              <span className="block text-xs font-semibold text-white">{provider.label}</span>
+              <span className="mt-1 block text-[10px] leading-4 text-zinc-600">{provider.desc}</span>
+            </button>
+          ))}
         </div>
 
-        <p className="label mt-3">API Key</p>
+        <p className="label mt-5">API Key</p>
         <input
-          className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+          className="control mt-2"
           type="password"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder={apiProvider === "azure" ? "粘贴客户 Azure OpenAI API Key" : "粘贴客户 OpenAI sk-... API Key"}
+          placeholder={`填写 ${providerDisplayName(apiProvider)} API Key`}
         />
-        <p className="mt-1 text-xs text-neutral-500">
-          只走客户自己的接口配置：客户 Azure 或客户 OpenAI。不会使用平台 Azure Key。
+        <p className="mt-2 text-xs leading-5 text-zinc-500">
+          Key 只保存在本机浏览器。主工作台不会展示完整密钥。
         </p>
 
         {apiProvider === "azure" ? (
-          <div className="mt-2 space-y-2">
+          <div className="mt-4 space-y-3">
             <input
-              className="w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+              className="control"
               value={azureEndpoint}
               onChange={(event) => setAzureEndpoint(event.target.value)}
               placeholder="Azure Endpoint，例如 https://xxx.cognitiveservices.azure.com/"
             />
             <input
-              className="w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+              className="control"
               value={azureDeployment}
               onChange={(event) => setAzureDeployment(event.target.value)}
-              placeholder="Deployment，例如 gpt-image-2"
+              placeholder="Image Deployment，例如 gpt-image-2"
             />
             <input
-              className="w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
+              className="control"
+              placeholder="Text Deployment（可选，例如 gpt-4.1-mini）"
+            />
+            <input
+              className="control"
               value={azureApiVersion}
               onChange={(event) => setAzureApiVersion(event.target.value)}
               placeholder="API Version，例如 2025-04-01-preview"
             />
           </div>
+        ) : isBananaProvider(apiProvider) ? (
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <SelectField
+              label="Model"
+              value={bananaModelOptions.some((item) => item.value === azureDeployment) ? azureDeployment : "banana-pro"}
+              onChange={setAzureDeployment}
+              options={bananaModelOptions}
+            />
+            <input
+              className="control"
+              value={baseURL}
+              onChange={(event) => setBaseURL(event.target.value)}
+              placeholder="Base URL（可选）：真实接口地址可后续在这里替换"
+            />
+          </div>
         ) : (
-          <input
-            className="mt-2 w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink"
-            value={baseURL}
-            onChange={(event) => setBaseURL(event.target.value)}
-            placeholder="OPENAI_BASE_URL，例如 https://api.openai.com/v1 或代理地址"
-          />
+          <div className="mt-4 space-y-3">
+            <input
+              className="control"
+              value={baseURL}
+              onChange={(event) => setBaseURL(event.target.value)}
+              placeholder="Base URL，例如 https://api.openai.com/v1 或兼容代理地址"
+            />
+            <input
+              className="control"
+              placeholder="Text Model（可选，例如 gpt-4.1-mini）"
+            />
+            <input
+              className="control"
+              value={azureDeployment}
+              onChange={(event) => setAzureDeployment(event.target.value)}
+              placeholder="Image Model，例如 gpt-image-2"
+            />
+          </div>
         )}
 
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="text-xs text-neutral-500">
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <span className="text-xs text-zinc-500">
             {apiKey ? `已填写：${maskApiKey(apiKey)}` : "平台不会保存你的完整 Key"}
           </span>
           <div className="flex gap-2">
-            <button className="border border-line bg-white px-3 py-1.5 text-xs" onClick={clearApiKey}>
+            <button className="studio-secondary-button min-h-9 px-3 text-xs" onClick={clearApiKey}>
               清除
             </button>
-            <button className="border border-line bg-white px-3 py-1.5 text-xs" onClick={saveApiKey}>
+            <button className="studio-primary-button min-h-9 px-4 text-xs" onClick={saveApiKey}>
               保存
             </button>
           </div>
         </div>
-      </div>
+      </section>
+
+      <details className="rounded-[24px] border border-white/[0.06] bg-white/[0.02] p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-white">导出设置</summary>
+        <p className="mt-3 text-xs leading-6 text-zinc-500">
+          当前仍由平台尺寸锁定、generationSize/exportSize 分离和导出画布逻辑控制最终图片尺寸。
+        </p>
+      </details>
+
+      <details className="rounded-[24px] border border-white/[0.06] bg-white/[0.02] p-5">
+        <summary className="cursor-pointer text-sm font-semibold text-white">开发者日志</summary>
+        <div className="mt-4 flex gap-2">
+          <button className="studio-secondary-button min-h-9 px-3 text-xs" onClick={() => setShowLogs(!showLogs)}>
+            {showLogs ? "隐藏日志" : "查看日志"}
+          </button>
+          <button className="studio-secondary-button min-h-9 px-3 text-xs" onClick={clearLogs}>
+            清空日志
+          </button>
+        </div>
+        {showLogs ? (
+          <div className="mt-4 max-h-64 space-y-2 overflow-auto rounded-2xl border border-white/[0.06] bg-black/25 p-3">
+            {logs.length ? (
+              logs.map((log) => (
+                <article key={log.id} className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-3 text-xs leading-5 text-zinc-400">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-zinc-200">{log.level.toUpperCase()} · {log.scope}</span>
+                    <span className="text-zinc-600">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                  <p className="mt-1">{log.message}</p>
+                </article>
+              ))
+            ) : (
+              <p className="py-6 text-center text-xs text-zinc-600">暂无日志。生成或检测接口后会显示。</p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs leading-6 text-zinc-600">日志默认隐藏，避免主界面出现开发测试感。</p>
+        )}
+      </details>
     </div>
   );
 }
@@ -2056,21 +2800,16 @@ function TextWorkflow(props: {
           className="control min-h-36 resize-none leading-6"
           value={props.prompt}
           onChange={(event) => props.setPrompt(event.target.value)}
-          placeholder="描述你想生成的电商图片，例如：一款高端香氛蜡烛的主图，柔和自然光，浅色背景..."
+          placeholder="描述你想生成的图片，也可以直接写目标市场和语言。例如：面向美国亚马逊市场，英文卖点文案，高端科技感产品主图。"
         />
       </div>
 
-      <TemplateButtons onPick={props.setPrompt} />
-
       <div className="grid grid-cols-2 gap-3">
-        <SelectField
-          label="风格预设"
-          value={props.style}
+        <InputField
+          label="视觉方向 / 风格补充"
+          value={["realistic", "minimalEcommerce", "tech", "poster", "luxury"].includes(props.style) ? "" : props.style}
           onChange={(value) => props.setStyle(value as StyleKey)}
-          options={Object.entries(styleLabels).map(([value, label]) => ({
-            value,
-            label,
-          }))}
+          placeholder="例如：巴西电商促销风、葡萄牙语标题、复古胶片风、冷色科技感"
         />
         <SelectField
           label="图片比例"
@@ -2080,13 +2819,7 @@ function TextWorkflow(props: {
             props.setRatio(nextRatio);
             props.setSize(ratioToSize[nextRatio]);
           }}
-          options={ratios.map((item) => ({ value: item, label: item }))}
-        />
-        <SelectField
-          label="图片尺寸"
-          value={props.size}
-          onChange={(value) => props.setSize(value as ImageSize)}
-          options={sizes.map((item) => ({ value: item, label: item }))}
+          options={ratioOptions()}
         />
         <SelectField
           label="质量"
@@ -2174,7 +2907,7 @@ function MimicWorkflow(props: {
         label="补充要求"
         value={props.extra}
         onChange={props.setExtra}
-        placeholder="例如：背景更干净，保留高级感，不要出现中文文字..."
+        placeholder="参考图主导风格、构图、排版、色调和光影；也可以写目标市场和语言，例如：巴西促销视觉，葡萄牙语标题。"
       />
 
       <div className="grid grid-cols-2 gap-3">
@@ -2194,7 +2927,7 @@ function MimicWorkflow(props: {
           label="比例"
           value={props.ratio}
           onChange={(value) => props.setRatio(value as Ratio)}
-          options={ratios.map((item) => ({ value: item, label: item }))}
+          options={ratioOptions()}
         />
         <SelectField
           label="输出数量"
@@ -2248,13 +2981,6 @@ function MimicWorkflow(props: {
   );
 }
 
-const productPromptTemplates = [
-  "生成纯白背景电商主图，产品居中，边缘干净，自然柔和投影，适合平台商品首图。",
-  "生成高级浅灰质感背景，产品居中偏大，柔和棚拍光影，增加轻微反射和商业留白。",
-  "生成科技感深色背景产品展示图，冷色光效，背景有简洁线条和能量氛围，产品主体不变。",
-  "生成生活方式场景图，让产品处于真实使用环境中，光影自然融合，画面干净高级。",
-  "生成电商强转化主图，背景简洁，预留卖点卡片区域，产品主体清晰突出。",
-];
 const protectionLevelOptions = [
   { value: "standard", label: "标准模式" },
   { value: "high-fidelity", label: "高保真模式" },
@@ -2306,6 +3032,24 @@ function ProductProtectionPanel(props: {
   );
 }
 
+function StudioAccordion({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="studio-accordion group">
+      <summary className="flex cursor-pointer select-none items-center justify-between gap-3 text-sm font-semibold text-zinc-200">
+        <span>{title}</span>
+        <span className="text-xs text-zinc-500 transition group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="mt-4 space-y-4">{children}</div>
+    </details>
+  );
+}
+
 function ProductWorkflow(props: {
   product: File | null;
   setProduct: (file: File | null) => void;
@@ -2314,6 +3058,12 @@ function ProductWorkflow(props: {
   setProductName: (value: string) => void;
   category: string;
   setCategory: (value: string) => void;
+  brand: string;
+  setBrand: (value: string) => void;
+  sellingPoints: string;
+  setSellingPoints: (value: string) => void;
+  specs: string;
+  setSpecs: (value: string) => void;
   prompt: string;
   setPrompt: (value: string) => void;
   ratio: Ratio;
@@ -2333,54 +3083,65 @@ function ProductWorkflow(props: {
         preview={props.productPreview}
         setFile={props.setProduct}
       />
-      <InputField
-        label="产品名称"
-        value={props.productName}
-        onChange={props.setProductName}
-        placeholder="例如：WF6 智能耳机"
-      />
-      <InputField
-        label="产品品类"
-        value={props.category}
-        onChange={props.setCategory}
-        placeholder="例如：蓝牙耳机 / 小家电 / 户外装备"
-      />
-      <TextareaField
-        label="背景/场景提示词"
-        value={props.prompt}
-        onChange={props.setPrompt}
-        placeholder="描述你想生成的背景、场景、光影、陈列方式和商业氛围。产品图会被锁定，不按提示词改产品本身。"
-      />
-      <div>
-        <p className="label mb-2">提示词类型</p>
-        <div className="grid grid-cols-1 gap-2">
-          {productPromptTemplates.map((template) => (
-            <button
-              key={template}
-              className="border border-line bg-paper px-3 py-2 text-left text-xs leading-5 text-neutral-700 transition hover:border-neutral-400 hover:bg-white"
-              onClick={() => props.setPrompt(template)}
-            >
-              {template}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <SelectField
-          label="比例"
-          value={props.ratio}
-          onChange={(value) => props.setRatio(value as Ratio)}
-          options={ratios.map((item) => ({ value: item, label: item }))}
+      <div className="grid grid-cols-2 gap-4">
+        <InputField
+          label="产品名称"
+          value={props.productName}
+          onChange={props.setProductName}
+          placeholder="例如：WF6 智能耳机"
+        />
+        <InputField
+          label="产品品类"
+          value={props.category}
+          onChange={props.setCategory}
+          placeholder="例如：蓝牙耳机"
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <QualityField value={props.quality} onChange={props.setQuality} />
+      <InputField
+        label="品牌名称"
+        value={props.brand}
+        onChange={props.setBrand}
+        placeholder="可选：用于统一商业视觉语气"
+      />
+      <TextareaField
+        label="卖点描述"
+        value={props.sellingPoints}
+        onChange={props.setSellingPoints}
+        placeholder="输入核心卖点、目标人群、使用场景和转化诉求。例如：长续航、主动降噪、通勤运动两用。"
+      />
+      <TextareaField
+        label="产品参数"
+        value={props.specs}
+        onChange={props.setSpecs}
+        placeholder="输入规格、材质、容量、颜色、包装清单等参数，系统会作为产品信息参考。"
+      />
+      <TextareaField
+        label="视觉方向 / 风格补充"
+        value={props.prompt}
+        onChange={props.setPrompt}
+        placeholder="描述背景、场景、光影、陈列和商业氛围，也可写目标市场和语言。例如：面向美国 Amazon，英文卖点，高端科技感。产品只锁定外观，不锁定风格。"
+      />
+      <div className="grid grid-cols-2 gap-4">
+        <SelectField
+          label="常用比例"
+          value={props.ratio}
+          onChange={(value) => props.setRatio(value as Ratio)}
+          options={ratioOptions()}
+        />
         <PlatformField value={props.platform} onChange={props.setPlatform} />
       </div>
-      <ProductProtectionPanel
-        level={props.protectionLevel}
-        setLevel={props.setProtectionLevel}
-      />
+      <div className="grid grid-cols-2 gap-4">
+        <QualityField value={props.quality} onChange={props.setQuality} />
+        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3 text-xs leading-5 text-zinc-500">
+          平台规则：已锁定最终导出尺寸
+        </div>
+      </div>
+      <StudioAccordion title="产品保护等级">
+        <ProductProtectionPanel
+          level={props.protectionLevel}
+          setLevel={props.setProtectionLevel}
+        />
+      </StudioAccordion>
     </>
   );
 }
@@ -2418,7 +3179,7 @@ function ProductVariantWorkflow(props: {
         label="变体提示词"
         value={props.prompt}
         onChange={props.setPrompt}
-        placeholder="例如：生成科技感深色背景产品海报，只改变背景、光影和排版"
+        placeholder="描述想变化的视觉方向、场景和市场语言。例如：巴西电商促销风，葡萄牙语标题，高饱和热带广告风。"
       />
       <div className="grid grid-cols-2 gap-3">
         <SelectField
@@ -2427,17 +3188,17 @@ function ProductVariantWorkflow(props: {
           onChange={props.setOutputType}
           options={productVariantOutputTypes.map((item) => ({ value: item, label: item }))}
         />
-        <SelectField
-          label="风格"
+        <InputField
+          label="视觉方向 / 风格补充"
           value={props.style}
           onChange={props.setStyle}
-          options={productVariantStyles.map((item) => ({ value: item, label: item }))}
+          placeholder="例如：冷色科技感、英文卖点、轻奢杂志大片、热带广告风"
         />
         <SelectField
           label="比例"
           value={props.ratio}
           onChange={(value) => props.setRatio(value as Ratio)}
-          options={ratios.map((item) => ({ value: item, label: item }))}
+          options={ratioOptions()}
         />
         <QualityField value={props.quality} onChange={props.setQuality} />
       </div>
@@ -2536,38 +3297,40 @@ function DetailSuiteWorkflow(props: {
             preview={props.productPreview}
             setFile={props.setProduct}
           />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <InputField label="产品名称" value={props.productName} onChange={props.setProductName} />
             <InputField label="产品品类" value={props.category} onChange={props.setCategory} />
           </div>
-          <InputField label="品牌名称" value={props.brand} onChange={props.setBrand} />
           <TextareaField label="核心卖点" value={props.sellingPoints} onChange={props.setSellingPoints} />
-          <TextareaField label="产品参数" value={props.specs} onChange={props.setSpecs} />
-          <TextareaField label="材质信息" value={props.material} onChange={props.setMaterial} />
-          <TextareaField label="功能说明" value={props.functions} onChange={props.setFunctions} />
-          <TextareaField label="包装清单" value={props.packageList} onChange={props.setPackageList} />
-          <TextareaField label="使用场景" value={props.useScenes} onChange={props.setUseScenes} />
-          <TextareaField label="适用人群" value={props.audience} onChange={props.setAudience} />
-          <TextareaField label="售后信息" value={props.afterSales} onChange={props.setAfterSales} />
           <TextareaField
-            label="详情图整体提示词"
+            label="视觉方向 / 风格补充"
             value={props.visualPrompt}
             onChange={props.setVisualPrompt}
-            placeholder="例如：生成适合 WB/OZON 的俄语详情页视觉，蓝色户外背景，产品大图靠左，右侧保留空白信息卡片，不要在图片里生成文字。"
+            placeholder="描述整套详情图的视觉方向，也可以直接写目标市场和语言。例如：面向美国 Amazon，英文卖点卡片，产品大图靠左，右侧保留信息区。"
           />
+          <StudioAccordion title="产品扩展信息">
+            <InputField label="品牌名称" value={props.brand} onChange={props.setBrand} />
+            <TextareaField label="产品参数" value={props.specs} onChange={props.setSpecs} />
+            <TextareaField label="材质信息" value={props.material} onChange={props.setMaterial} />
+            <TextareaField label="功能说明" value={props.functions} onChange={props.setFunctions} />
+            <TextareaField label="包装清单" value={props.packageList} onChange={props.setPackageList} />
+            <TextareaField label="使用场景" value={props.useScenes} onChange={props.setUseScenes} />
+            <TextareaField label="适用人群" value={props.audience} onChange={props.setAudience} />
+            <TextareaField label="售后信息" value={props.afterSales} onChange={props.setAfterSales} />
+          </StudioAccordion>
         </>
       )}
 
       {props.step === 2 && (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <SelectField
               label="生成张数"
               value={String(props.count)}
               onChange={(value) => props.setCount(Number(value))}
               options={detailCountOptions.map((item) => ({
                 value: String(item),
-                label: `${item} 张`,
+                label: item === 12 ? "自定义 12 张" : `${item} 张`,
               }))}
             />
             <SelectField
@@ -2576,49 +3339,42 @@ function DetailSuiteWorkflow(props: {
               onChange={(value) => props.setWorkflowPlatform(value as DetailPlatform)}
               options={detailPlatformOptions.map((item) => ({ value: item, label: item }))}
             />
-            <SelectField
-              label="目标市场"
-              value={props.market}
-              onChange={(value) => props.setMarket(value as DetailMarket)}
-              options={detailMarketOptions.map((item) => ({ value: item, label: item }))}
-            />
-            <SelectField
-              label="输出语言"
-              value={props.language}
-              onChange={(value) => props.setLanguage(value as DetailLanguage)}
-              options={detailLanguageOptions.map((item) => ({ value: item, label: item }))}
-            />
-            <SelectField
-              label="详情风格"
+            <InputField
+              label="视觉方向 / 风格补充"
               value={props.style}
               onChange={props.setStyle}
-              options={ecommerceStylePresets.map((item) => ({ value: item, label: item }))}
+              placeholder="例如：巴西电商促销风，葡萄牙语标题，高饱和夏日场景"
             />
             <SelectField
-              label="比例"
+              label="常用比例"
               value={props.ratio}
               onChange={(value) => props.setRatio(value as Ratio)}
-              options={ratios.map((item) => ({ value: item, label: item }))}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <QualityField value={props.quality} onChange={props.setQuality} />
-            <SelectField
-              label="文字模式"
-              value={props.textMode}
-              onChange={(value) => props.setTextMode(value as "editable-layers" | "image-text")}
-              options={[
-                { value: "editable-layers", label: "可编辑文字层" },
-                { value: "image-text", label: "图片内生成文字" },
-              ]}
+              options={ratioOptions()}
             />
           </div>
           <TextareaField
             label="套图生成提示词"
             value={props.visualPrompt}
             onChange={props.setVisualPrompt}
-            placeholder="控制整套详情图的背景、场景、光影、卡片风格和排版。默认不让 AI 在图里生成文字，文字用前端可编辑层处理。"
+            placeholder="控制整套详情图的背景、场景、光影、卡片风格、排版、目标市场和文案语言。默认文字可做后期可编辑层。"
           />
+          <StudioAccordion title="高级输出设置">
+            <div className="grid grid-cols-2 gap-4">
+              <QualityField value={props.quality} onChange={props.setQuality} />
+              <SelectField
+                label="文字模式"
+                value={props.textMode}
+                onChange={(value) => props.setTextMode(value as "editable-layers" | "image-text")}
+                options={[
+                  { value: "editable-layers", label: "可编辑文字层" },
+                  { value: "image-text", label: "图片内生成文字" },
+                ]}
+              />
+            </div>
+            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3 text-xs leading-6 text-zinc-400">
+              尺寸策略由平台规则自动锁定，生成尺寸与最终导出尺寸分离处理。
+            </div>
+          </StudioAccordion>
           <button className="secondary-button w-full justify-center" onClick={props.generateBlueprints}>
             生成详情图蓝图
           </button>
@@ -2744,7 +3500,7 @@ function DetailWorkflow(props: {
         label="比例"
         value={props.ratio}
         onChange={(value) => props.setRatio(value as Ratio)}
-        options={ratios.map((item) => ({ value: item, label: item }))}
+        options={ratioOptions()}
       />
       <div className="grid grid-cols-2 gap-3">
         <QualityField value={props.quality} onChange={props.setQuality} />
@@ -2829,17 +3585,17 @@ function PosterWorkflow(props: {
           onChange={(value) => props.setPosterType(value as PosterType)}
           options={posterTypes.map((item) => ({ value: item, label: item }))}
         />
-        <SelectField
-          label="风格"
+        <InputField
+          label="视觉方向 / 风格补充"
           value={props.posterStyle}
           onChange={(value) => props.setPosterStyle(value as PosterStyle)}
-          options={posterStyles.map((item) => ({ value: item, label: item }))}
+          placeholder="例如：高饱和热带广告风、英文标题、赛博促销、轻奢杂志大片"
         />
         <SelectField
-          label="比例"
+          label="常用比例"
           value={props.ratio}
           onChange={(value) => props.setRatio(value as Ratio)}
-          options={ratios.map((item) => ({ value: item, label: item }))}
+          options={ratioOptions()}
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -2851,28 +3607,6 @@ function PosterWorkflow(props: {
         setLevel={props.setProtectionLevel}
       />
     </>
-  );
-}
-
-function TemplateButtons({ onPick }: { onPick: (prompt: string) => void }) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center gap-2">
-        <Sparkles className="h-4 w-4 text-accent" />
-        <span className="label">提示词模板库</span>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {ecommercePromptTemplates.map((template) => (
-          <button
-            key={template.id}
-            className="border border-line bg-paper px-3 py-2 text-left text-sm text-ink transition hover:border-neutral-400 hover:bg-white"
-            onClick={() => onPick(template.prompt)}
-          >
-            {template.name}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -2919,7 +3653,7 @@ function UploadBox({
         onChange={handleFileChange}
       />
       <button
-        className="secondary-button w-full justify-center"
+        className="studio-upload-button w-full max-w-none justify-center"
         onClick={() => inputRef.current?.click()}
         disabled={isCompressing}
       >
@@ -3034,7 +3768,7 @@ function InputField({
     <label>
       <span className="label mb-2 block">{label}</span>
       <input
-        className="control"
+        className="control w-full max-w-none"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
@@ -3058,7 +3792,7 @@ function TextareaField({
     <label>
       <span className="label mb-2 block">{label}</span>
       <textarea
-        className="control min-h-24 resize-none leading-6"
+        className="control min-h-[128px] w-full max-w-none resize-none leading-relaxed"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
@@ -3121,7 +3855,7 @@ function SelectField({
     <label>
       <span className="label mb-2 block">{label}</span>
       <select
-        className="control"
+        className="control w-full max-w-none"
         value={value}
         onChange={(event) => onChange(event.target.value)}
       >
@@ -3215,8 +3949,8 @@ function tabTitle(tab: TabKey) {
   return map[tab];
 }
 
-function formatDuration(ms: number) {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+function formatDuration(ms: number | null | undefined) {
+  const totalSeconds = Math.max(0, Math.round((ms || 0) / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
@@ -3246,3 +3980,5 @@ function logTextClass(level: ServerLogEntry["level"]) {
   };
   return map[level];
 }
+
+

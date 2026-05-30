@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       size: ratioToSize[ratio],
       quality,
       count: 1,
-      clients: { openai: auth.openai },
+      clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
     });
 
     return NextResponse.json({

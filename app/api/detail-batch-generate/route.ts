@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { generateImageWithReferences } from "@/lib/image-generation";
+import { resolveGenerationSize } from "@/lib/image/resolveGenerationSize";
+import { getPlatformRule } from "@/lib/templates/platformRules";
 import { buildDetailImagePrompt } from "@/lib/promptBuilders";
-import { ratioToSize } from "@/lib/templates";
 import { publicPrompt } from "@/lib/workflow-privacy";
 import {
   isWorkflowAuthResponse,
@@ -9,7 +10,7 @@ import {
 } from "@/lib/server/withWorkflowAuth";
 import { defaultProductProtection } from "@/types/workflow";
 import type { DetailBlueprintItem } from "@/types/detail";
-import type { ImageQuality, Ratio } from "@/lib/workflow";
+import type { ImageQuality } from "@/lib/workflow";
 
 export const runtime = "nodejs";
 
@@ -45,11 +46,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "请先生成或编辑详情图蓝图。" }, { status: 400 });
     }
 
-    const ratio = String(formData.get("ratio") || "1:1") as Ratio;
     const quality = String(formData.get("quality") || "low") as ImageQuality;
     const outputs = [];
 
     for (const blueprint of blueprints.slice(0, 12)) {
+      const rule = getPlatformRule(blueprint.platform);
+      const resolvedSize =
+        blueprint.targetWidth && blueprint.targetHeight
+          ? resolveGenerationSize(blueprint.targetWidth, blueprint.targetHeight)
+          : resolveGenerationSize(rule.targetSize.width, rule.targetSize.height);
       const prompt = buildDetailImagePrompt({
         blueprintPrompt: buildPrivateBlueprintPrompt(blueprint),
         title: blueprint.title,
@@ -62,12 +67,20 @@ export async function POST(request: Request) {
       const result = await generateImageWithReferences({
         prompt,
         images: [product],
-        size: ratioToSize[ratio],
+        size: resolvedSize.generationSize,
         quality,
         count: 1,
-        clients: { openai: auth.openai },
+      clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
       });
-      outputs.push({ blueprint, prompt: publicPrompt(), images: result.images });
+      outputs.push({
+        blueprint,
+        prompt: publicPrompt(),
+        images: result.images.map((image) => ({
+          ...image,
+          exportWidth: resolvedSize.targetWidth,
+          exportHeight: resolvedSize.targetHeight,
+        })),
+      });
     }
 
     return NextResponse.json({

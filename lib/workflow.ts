@@ -33,6 +33,7 @@ export const ratios = [
   "463:625",
   "1200:1500",
   "1600:1600",
+  "custom",
 ] as const;
 export const sizes = [
   "1024x1024",

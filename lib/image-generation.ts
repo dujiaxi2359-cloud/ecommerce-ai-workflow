@@ -14,6 +14,8 @@ export type GeneratedImage = {
   id: string;
   index: number;
   url: string;
+  exportWidth?: number;
+  exportHeight?: number;
 };
 
 export type ImageGenerationResult = {
@@ -23,6 +25,7 @@ export type ImageGenerationResult = {
 
 type ImageGenerationClients = {
   openai?: OpenAI;
+  imageModel?: string;
 };
 
 function getDefaultOpenAIClient() {
@@ -188,17 +191,19 @@ async function generateOpenAIImage({
   quality,
   count,
   client = getDefaultOpenAIClient(),
+  model = imageModel,
 }: {
   prompt: string;
   size: ImageSize;
   quality: ImageQuality;
   count: number;
   client?: OpenAI;
+  model?: string;
 }) {
   const apiSize = normalizeSizeForImageApi(size, quality);
   const startedAt = Date.now();
   addServerLog("info", "openai.generate", "Starting OpenAI image generation", {
-    model: imageModel,
+    model,
     size: apiSize.size,
     requestedSize: apiSize.changed ? apiSize.original : undefined,
     sizeNormalization: apiSize.reason,
@@ -208,7 +213,7 @@ async function generateOpenAIImage({
 
   const result = await withImageApiRetry("openai.generate", () =>
     client.images.generate({
-      model: imageModel,
+      model,
       prompt,
       size: apiSize.size,
       quality,
@@ -238,7 +243,7 @@ export async function generateImage({
   clients?: ImageGenerationClients;
 }): Promise<ImageGenerationResult> {
   if (clients?.openai) {
-    return generateOpenAIImage({ prompt, size, quality, count, client: clients.openai });
+    return generateOpenAIImage({ prompt, size, quality, count, client: clients.openai, model: clients.imageModel });
   }
 
   if (hasAzureImageConfig()) {
@@ -325,7 +330,7 @@ export async function generateImageWithReferences({
   const startedAt = Date.now();
   const apiSize = normalizeSizeForImageApi(size, quality);
   addServerLog("info", "openai.edit", "Starting OpenAI image edit", {
-    model: imageModel,
+    model: clients?.imageModel || imageModel,
     size: apiSize.size,
     requestedSize: apiSize.changed ? apiSize.original : undefined,
     sizeNormalization: apiSize.reason,
@@ -344,7 +349,7 @@ export async function generateImageWithReferences({
 
   const result = await withImageApiRetry("openai.edit", () =>
     (clients?.openai || getDefaultOpenAIClient()).images.edit({
-      model: imageModel,
+      model: clients?.imageModel || imageModel,
       prompt,
       image: inputFiles,
       size: apiSize.size,

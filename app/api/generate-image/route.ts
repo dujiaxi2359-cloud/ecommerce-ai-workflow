@@ -115,14 +115,14 @@ export async function POST(request: Request) {
             size,
             quality,
             count,
-            clients: { openai: auth.openai },
+            clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
           })
         : await generateImage({
             prompt: finalPrompt,
             size,
             quality,
             count,
-            clients: { openai: auth.openai },
+            clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
           });
 
     const createdAt = new Date().toISOString();

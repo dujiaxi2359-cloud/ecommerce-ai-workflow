@@ -10,10 +10,14 @@ export type DetailPlatform =
   | "Shopee"
   | "Lazada"
   | "Amazon / 亚马逊"
-  | "WB/OZON"
+  | "Mercado Libre / 美客多"
+  | "Ozon"
+  | "Wildberries / WB"
+  | "天猫"
+  | "京东"
+  | "抖音电商"
+  | "小红书电商 / 内容电商"
   | "独立站"
-  | "小红书"
-  | "抖音"
   | "通用电商";
 
 export type DetailTextLayer = {
@@ -39,6 +43,10 @@ export type DetailBlueprintItem = {
   backgroundStyle: string;
   prompt: string;
   textLayers: DetailTextLayer[];
+  targetWidth?: number;
+  targetHeight?: number;
+  generationSize?: string;
+  exportSize?: string;
 };
 
 export type DetailBlueprintInput = {
@@ -63,5 +71,5 @@ export type DetailBlueprintInput = {
   platform: DetailPlatform;
   count: number;
   style: string;
-  textMode: "editable-layers" | "image-text";
+  textMode: "editable-layers" | "image-text" | "minimal-text";
 };

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import type OpenAI from "openai";
 import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
-import { createOpenAIClientFromRequest, sanitizeApiKeyError } from "@/lib/apiKey/openaiClientFromRequest";
+import { sanitizeApiKeyError } from "@/lib/apiKey/openaiClientFromRequest";
 import { checkCredits } from "@/lib/credits/checkCredits";
 import { hasFeatureAccess } from "@/lib/license/featureAccess";
 import type { FeatureKey, LicenseStatus } from "@/lib/license/licenseTypes";
 import { verifyLicense } from "@/lib/license/verifyLicense";
+import { createImageClient } from "@/lib/providers/createImageClient";
 
 export type WorkflowAuthContext = {
   license: LicenseStatus;
@@ -16,6 +17,9 @@ export type WorkflowAuthContext = {
   azureEndpoint?: string;
   azureDeployment?: string;
   azureApiVersion?: string;
+  textModel?: string;
+  imageModel?: string;
+  googleBananaModel?: string;
 };
 
 export type WorkflowAuthInput = {
@@ -26,6 +30,9 @@ export type WorkflowAuthInput = {
   azureEndpoint?: string;
   azureDeployment?: string;
   azureApiVersion?: string;
+  textModel?: string;
+  imageModel?: string;
+  googleBananaModel?: string;
   featureKey: FeatureKey;
   requireApiKey?: boolean;
 };
@@ -42,6 +49,9 @@ export async function validateWorkflowAuth({
   azureEndpoint,
   azureDeployment,
   azureApiVersion,
+  textModel,
+  imageModel,
+  googleBananaModel,
   featureKey,
   requireApiKey = true,
 }: WorkflowAuthInput): Promise<WorkflowAuthContext> {
@@ -68,27 +78,36 @@ export async function validateWorkflowAuth({
       azureEndpoint: azureEndpoint || "",
       azureDeployment: azureDeployment || "",
       azureApiVersion: azureApiVersion || "",
+      textModel: textModel || "",
+      imageModel: imageModel || "",
+      googleBananaModel: googleBananaModel || "",
     };
   }
 
-  const openai = createOpenAIClientFromRequest({
+  const imageClient = createImageClient({
     provider: apiProvider,
     apiKey: apiKey || "",
     baseURL: baseURL || "",
     azureEndpoint: azureEndpoint || "",
     azureDeployment: azureDeployment || "",
     azureApiVersion: azureApiVersion || "",
+    textModel: textModel || "",
+    imageModel: imageModel || "",
+    googleBananaModel: googleBananaModel || "",
   });
 
   return {
     license,
-    openai,
+    openai: imageClient.client,
     apiProvider,
     apiKey: apiKey || "",
     baseURL: baseURL || "",
     azureEndpoint: azureEndpoint || "",
     azureDeployment: azureDeployment || "",
     azureApiVersion: azureApiVersion || "",
+    textModel: textModel || "",
+    imageModel: imageClient.imageModel || imageModel || "",
+    googleBananaModel: googleBananaModel || "",
   };
 }
 
@@ -107,6 +126,9 @@ export async function withWorkflowAuthFromFormData(
       azureEndpoint: String(formData.get("azureEndpoint") || ""),
       azureDeployment: String(formData.get("azureDeployment") || ""),
       azureApiVersion: String(formData.get("azureApiVersion") || ""),
+      textModel: String(formData.get("textModel") || ""),
+      imageModel: String(formData.get("imageModel") || ""),
+      googleBananaModel: String(formData.get("googleBananaModel") || ""),
       featureKey,
       requireApiKey: options.requireApiKey,
     });
@@ -129,6 +151,9 @@ export async function withWorkflowAuthFromJson(
     azureEndpoint?: string;
     azureDeployment?: string;
     azureApiVersion?: string;
+    textModel?: string;
+    imageModel?: string;
+    googleBananaModel?: string;
   },
   featureKey: FeatureKey,
   options: { requireApiKey?: boolean } = {},
@@ -142,6 +167,9 @@ export async function withWorkflowAuthFromJson(
       azureEndpoint: body.azureEndpoint || "",
       azureDeployment: body.azureDeployment || "",
       azureApiVersion: body.azureApiVersion || "",
+      textModel: body.textModel || "",
+      imageModel: body.imageModel || "",
+      googleBananaModel: body.googleBananaModel || "",
       featureKey,
       requireApiKey: options.requireApiKey,
     });

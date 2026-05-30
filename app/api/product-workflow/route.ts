@@ -66,7 +66,7 @@ export async function POST(request: Request) {
       size: productWorkflowSizeByRatio[ratio] || ratioToSize[ratio],
       quality,
       count,
-      clients: { openai: auth.openai },
+      clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
     });
 
     return NextResponse.json({

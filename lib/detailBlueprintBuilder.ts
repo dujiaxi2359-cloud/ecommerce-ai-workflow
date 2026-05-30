@@ -1,7 +1,8 @@
 import { createId } from "@/lib/id";
 import { detailLayouts } from "@/lib/templates/detailLayouts";
 import { amazonDetailTypes, detailTypes } from "@/lib/templates/detailTypes";
-import { getPlatformPreset } from "@/lib/templates/platformPresets";
+import { resolveGenerationSize } from "@/lib/image/resolveGenerationSize";
+import { getPlatformRule } from "@/lib/templates/platformRules";
 import type { DetailBlueprintInput, DetailBlueprintItem } from "@/types/detail";
 
 function splitPoints(value: string, fallback: string[]) {
@@ -163,23 +164,12 @@ function localizedCopy(input: DetailBlueprintInput, type: string, index: number)
 }
 
 export function buildDetailBlueprint(input: DetailBlueprintInput): DetailBlueprintItem[] {
-  const count = Math.min(Math.max(Number(input.count) || 5, 1), 20);
-  const platform = getPlatformPreset(
-    input.platform.includes("Amazon")
-      ? "amazon"
-      : input.platform.includes("WB") || input.platform.includes("OZON")
-        ? "wb_ozon"
-      : input.platform.includes("TikTok")
-        ? "tiktok"
-        : input.platform.includes("抖音")
-          ? "douyin"
-          : input.platform.includes("小红书")
-            ? "xiaohongshu"
-            : "general",
-  );
+  const platform = getPlatformRule(input.platform);
+  const count = Math.min(Math.max(Number(input.count) || platform.defaultCount, 1), 20);
+  const resolvedSize = resolveGenerationSize(platform.targetSize.width, platform.targetSize.height);
   const typePool = input.platform.includes("Amazon")
-    ? [...amazonDetailTypes, ...detailTypes]
-    : detailTypes;
+    ? [...platform.structure, ...amazonDetailTypes, ...detailTypes]
+    : [...platform.structure, ...detailTypes];
   const sellingPoints = splitPoints(input.sellingPoints, [
     languageCode(input.language) === "zh" ? "核心功能清晰" : "Clear key feature",
     languageCode(input.language) === "zh" ? "材质质感可靠" : "Reliable material quality",
@@ -215,10 +205,12 @@ export function buildDetailBlueprint(input: DetailBlueprintInput): DetailBluepri
         ? [
             `详情图第 ${index} 张：${displayType}`,
             `产品：${input.productName || "根据产品图判断"}，品类：${input.category || "未填写"}，品牌：${input.brandName || "未填写"}`,
-            `平台：${input.platform}。${platform.prompt}`,
+            `平台：${input.platform}。${platform.promptHint}`,
+            `平台规则：${platform.rules.join("；")}`,
+            `目标导出尺寸：${resolvedSize.exportSize}。模型生成尺寸：${resolvedSize.generationSize}，最终下载需后处理到平台目标尺寸。`,
             `目标市场：${input.targetMarket}，输出语言：${input.language}`,
             `套图生成提示词：${input.visualPrompt || "按平台和产品卖点生成清晰详情图视觉。"}`,
-            `风格：${input.style}`,
+            `视觉倾向：${input.style || "由用户提示词决定，不套用固定风格模板"}`,
             `版式：${layout}`,
             `文字层标题：${copy.title}`,
             `文字层副标题：${copy.subtitle}`,
@@ -230,11 +222,13 @@ export function buildDetailBlueprint(input: DetailBlueprintInput): DetailBluepri
             `Product: ${input.productName || "infer from uploaded product image"}`,
             `Category: ${input.category || "not specified"}`,
             `Brand: ${input.brandName || "not specified"}`,
-            `Platform: ${input.platform}. ${platform.prompt}`,
+            `Platform: ${input.platform}. ${platform.promptHint}`,
+            `Platform rules: ${platform.rules.join("; ")}`,
+            `Target export size: ${resolvedSize.exportSize}. Generate with ${resolvedSize.generationSize}, then export to the platform target size.`,
             `Target market: ${input.targetMarket}`,
             `Output language: ${input.language}`,
             `User visual prompt for the whole detail set: ${input.visualPrompt || "Create a clean ecommerce detail image according to the product benefits and platform style."}`,
-            `Visual style: ${input.style}`,
+            `Visual direction: ${input.style || "driven by user prompt, not a fixed style preset"}`,
             `Layout: ${layout}`,
             `Text-layer title only, do not render in image unless image-text mode: ${copy.title}`,
             `Text-layer subtitle only, do not render in image unless image-text mode: ${copy.subtitle}`,
@@ -269,6 +263,10 @@ export function buildDetailBlueprint(input: DetailBlueprintInput): DetailBluepri
           y: 28 + pointIndex * 8,
         })),
       ],
+      targetWidth: resolvedSize.targetWidth,
+      targetHeight: resolvedSize.targetHeight,
+      generationSize: resolvedSize.generationSize,
+      exportSize: resolvedSize.exportSize,
     };
   });
 }

@@ -3,14 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev",
     "build": "next build --webpack",
     "start": "node scripts/start-lan.js",
+    "start:local": "node scripts/start-local-preview.js",
     "start:lan": "node scripts/start-lan.js",
+    "preview:local": "node scripts/start-local-preview.js",
+    "preview:restart": "powershell -ExecutionPolicy Bypass -File scripts/restart-local-preview.ps1",
     "start:keepalive": "node scripts/keep-alive.js",
     "lint": "eslint ."
   },
   "dependencies": {
+    "framer-motion": "^12.40.0",
     "lucide-react": "latest",
     "next": "latest",
     "openai": "latest",

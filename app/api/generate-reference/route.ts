@@ -82,7 +82,7 @@ export async function POST(request: Request) {
       size: ratioToSize[ratio],
       quality,
       count,
-      clients: { openai: auth.openai },
+      clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
     });
 
     const createdAt = new Date().toISOString();

@@ -53,12 +53,19 @@ export async function POST(request: Request) {
     apiProvider?: ApiProvider;
     apiKey?: string;
     baseURL?: string;
-    azureEndpoint?: string;
-    azureDeployment?: string;
-    azureApiVersion?: string;
+  azureEndpoint?: string;
+  azureDeployment?: string;
+  azureApiVersion?: string;
+  imageModel?: string;
+  googleBananaModel?: string;
   };
 
-  const provider = body.apiProvider === "azure" ? "azure" : "openai";
+  const provider =
+    body.apiProvider === "azure" || body.apiProvider === "azure-openai"
+      ? "azure"
+      : body.apiProvider === "google-banana"
+        ? "google-banana"
+        : "openai";
   const apiKey = body.apiKey?.trim() || "";
 
   if (!apiKey) {
@@ -66,6 +73,24 @@ export async function POST(request: Request) {
       { ok: false, error: "API Key 缺失：请先填写客户自己的 API Key。" },
       { status: 400 },
     );
+  }
+
+  if (provider === "google-banana") {
+    const baseURL = normalizeOpenAICompatibleBaseURL(body.baseURL);
+    if (!baseURL) {
+      return NextResponse.json(
+        { ok: false, error: "Google Banana 需要填写 Base URL，模型可选择 Banana 2 或 Banana Pro。" },
+        { status: 400 },
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      type: "google-banana",
+      message: `Google Banana 配置已保存：${body.googleBananaModel || body.imageModel || "banana-pro"}`,
+      baseURL,
+      model: body.googleBananaModel || body.imageModel || "banana-pro",
+    });
   }
 
   if (provider === "azure") {

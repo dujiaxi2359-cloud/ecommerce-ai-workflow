@@ -83,14 +83,14 @@ export function normalizeAzureEndpoint(input?: string | null) {
 }
 
 export function createOpenAIClientFromRequest(config: UserApiKeyConfig) {
-  const provider: ApiProvider = config.provider || "openai";
+  const provider = config.provider === "azure" ? "azure-openai" : config.provider === "openai" ? "openai-compatible" : config.provider || "openai-compatible";
   const apiKey = config.apiKey?.trim();
 
   if (!apiKey) {
     throw new Error("API Key 缺失：请填写客户自己的 API Key。");
   }
 
-  if (provider === "azure") {
+  if (provider === "azure-openai") {
     const parsed = parseAzureEndpoint(config.azureEndpoint || config.baseURL);
     const endpoint =
       normalizeAzureEndpoint(config.azureEndpoint || config.baseURL) ||
@@ -121,7 +121,14 @@ export function createOpenAIClientFromRequest(config: UserApiKeyConfig) {
     });
   }
 
-  const baseURL = normalizeOpenAICompatibleBaseURL(config.baseURL);
+  const bananaBaseURL = provider === "google-banana"
+    ? config.baseURL || readEnv("GOOGLE_BANANA_BASE_URL", "BANANA_BASE_URL")
+    : config.baseURL;
+  if (provider === "google-banana" && !bananaBaseURL) {
+    throw new Error("Google Banana 需要填写 Banana Base URL，或在服务器配置 GOOGLE_BANANA_BASE_URL。");
+  }
+
+  const baseURL = normalizeOpenAICompatibleBaseURL(bananaBaseURL);
 
   return new OpenAI({
     apiKey,

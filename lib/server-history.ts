@@ -107,6 +107,8 @@ export async function saveSharedHistory(
           id: image.id,
           index: image.index ?? index,
           url: image.url,
+          exportWidth: image.exportWidth,
+          exportHeight: image.exportHeight,
         };
       }
 
@@ -117,6 +119,8 @@ export async function saveSharedHistory(
         index: image.index ?? index,
         file: filename,
         mimeType: parsed.mimeType,
+        exportWidth: image.exportWidth,
+        exportHeight: image.exportHeight,
       };
     }),
   );
@@ -155,6 +159,8 @@ export async function getSharedHistoryImages(historyId: string) {
       file?: string;
       mimeType?: string;
       url?: string;
+      exportWidth?: number;
+      exportHeight?: number;
     }>;
   };
 
@@ -165,6 +171,8 @@ export async function getSharedHistoryImages(historyId: string) {
           id: image.id || `${id}-${index}`,
           index: image.index ?? index,
           url: image.url,
+          exportWidth: image.exportWidth,
+          exportHeight: image.exportHeight,
         };
       }
 
@@ -177,6 +185,8 @@ export async function getSharedHistoryImages(historyId: string) {
         id: image.id || `${id}-${index}`,
         index: image.index ?? index,
         url: `data:${image.mimeType || "image/png"};base64,${buffer.toString("base64")}`,
+        exportWidth: image.exportWidth,
+        exportHeight: image.exportHeight,
       };
     }),
   );

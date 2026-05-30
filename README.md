@@ -213,3 +213,27 @@ GET /api/openai-status
 私有部署版：为客户部署独立版本，使用客户自己的环境变量、授权码和存储服务。
 
 核心原则：后续升级账号、支付、额度、云存储时，不重写已有六个工作流，只替换对应模块实现。
+## AIGC DESIGN STUDIO V4.2 更新说明
+
+本项目已重构为两段式商业化 Studio 体验：
+
+- 首屏启动页：先选择“今天要做点什么”，再进入指定工作流。
+- 正式工作台：左侧只保留工作流选择和当前工作流核心输入，中间为大画布，右侧为历史资产。
+- 设置中心：授权码、API Key、Base URL、文本模型、图片模型、Azure OpenAI、Google Banana 配置全部移动到右上角齿轮按钮。
+- Prompt Enhancer：继续通过 `/api/enhance-prompt` 读取平台、尺寸、产品信息和用户 Prompt 做结构化增强。
+- 平台尺寸：继续使用集中平台规则和 generationSize / exportSize 分离逻辑，最终下载按平台目标尺寸导出。
+
+### Provider 支持
+
+统一 Provider 配置位于 `lib/providers/`：
+
+- `openai-compatible`：OpenAI 官方或兼容 `/v1` 接口。
+- `azure-openai`：Azure OpenAI deployment 模式。
+- `google-banana`：Google Banana 生图接口。
+
+Google Banana 模型映射位于 `lib/providers/providerConfig.ts`：
+
+- Banana 2 -> `banana-2`
+- Banana Pro -> `banana-pro`
+
+如果真实接口模型名变化，只需要修改该配置文件，不需要改工作流页面。

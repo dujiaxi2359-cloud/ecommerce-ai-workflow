@@ -142,6 +142,7 @@ export const ratioToSize: Record<
   "463:625": "463x625",
   "1200:1500": "1200x1500",
   "1600:1600": "1600x1600",
+  custom: "1024x1024",
 };
 
 export function platformPrompt(platformId: EcommercePlatformId) {
