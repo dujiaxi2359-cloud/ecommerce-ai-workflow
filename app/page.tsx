@@ -1699,7 +1699,7 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="dot-grid relative flex min-h-0 flex-1 flex-col">
+        <section className="dot-grid relative flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex h-[74px] items-center justify-between border-b border-white/[0.06] px-8">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-zinc-600">
@@ -1796,7 +1796,7 @@ export default function Home() {
           )}
         </section>
 
-        <aside className="studio-history flex min-h-0 flex-col">
+        <aside className="studio-history flex min-h-0 w-[280px] shrink-0 flex-col">
           <div className="border-b border-white/[0.06] px-6 py-5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

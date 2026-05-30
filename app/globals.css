@@ -348,7 +348,11 @@ select:focus-visible {
 
 .studio-history {
   border-width: 0 0 0 1px;
-  min-width: 0;
+  width: 280px;
+  min-width: 280px;
+  max-width: 280px;
+  flex: 0 0 280px;
+  overflow: hidden;
 }
 
 .studio-canvas {
@@ -853,6 +857,10 @@ select.control option {
 
   .studio-history {
     display: none;
+    width: 0;
+    min-width: 0;
+    max-width: 0;
+    flex-basis: 0;
   }
 }
 
