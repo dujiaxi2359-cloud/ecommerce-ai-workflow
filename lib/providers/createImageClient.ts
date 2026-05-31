@@ -12,10 +12,8 @@ export function createImageClient(config: ProviderConfig): StudioImageClient {
   const provider = config.provider === "azure" ? "azure-openai" : config.provider === "openai" ? "openai-compatible" : config.provider;
   const imageModel =
     provider === "google-banana"
-      ? config.googleBananaModel || config.imageModel || config.azureDeployment || "banana-pro"
-      : provider === "azure-openai"
-        ? config.azureDeployment || config.imageModel || "gpt-image-2"
-        : config.imageModel || undefined;
+      ? config.googleBananaModel || config.imageModel || "banana-pro"
+      : config.imageModel || config.azureDeployment || "gpt-image-2";
 
   const client = createOpenAIClientFromRequest({
     ...config,

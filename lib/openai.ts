@@ -1,7 +1,6 @@
 import dns from "node:dns";
 import OpenAI, { AzureOpenAI } from "openai";
 import { Agent } from "undici";
-import { getImageApiTimeoutMs } from "@/lib/image-api-timeout";
 
 const officialBaseURL = "https://api.openai.com/v1";
 const defaultOpenAIIps = ["104.18.7.192", "104.18.6.192"];
@@ -57,7 +56,7 @@ export function createOpenAIDispatcher() {
   });
 }
 
-export function createOpenAIClient(timeout = getImageApiTimeoutMs()) {
+export function createOpenAIClient(timeout = 300_000) {
   const dispatcher = createOpenAIDispatcher();
 
   return new OpenAI({
@@ -72,7 +71,7 @@ export function hasAzureImageConfig() {
   return Boolean(azureOpenAIEndpoint && azureOpenAIApiKey && azureOpenAIDeployment);
 }
 
-export function createAzureOpenAIClient(timeout = getImageApiTimeoutMs()) {
+export function createAzureOpenAIClient(timeout = 300_000) {
   return new AzureOpenAI({
     endpoint: azureOpenAIEndpoint,
     apiKey: azureOpenAIApiKey,

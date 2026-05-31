@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import { getImageApiTimeoutMs } from "@/lib/image-api-timeout";
 import type { ApiProvider, UserApiKeyConfig } from "./apiKeyTypes";
 
 const DEFAULT_AZURE_API_VERSION = "2025-04-01-preview";
@@ -86,7 +85,6 @@ export function normalizeAzureEndpoint(input?: string | null) {
 export function createOpenAIClientFromRequest(config: UserApiKeyConfig) {
   const provider = config.provider === "azure" ? "azure-openai" : config.provider === "openai" ? "openai-compatible" : config.provider || "openai-compatible";
   const apiKey = config.apiKey?.trim();
-  const timeout = getImageApiTimeoutMs();
 
   if (!apiKey) {
     throw new Error("API Key 缺失：请填写客户自己的 API Key。");
@@ -119,7 +117,7 @@ export function createOpenAIClientFromRequest(config: UserApiKeyConfig) {
       baseURL: `${trimTrailingSlash(endpoint)}/openai/deployments/${deployment}`,
       defaultQuery: { "api-version": apiVersion },
       defaultHeaders: { "api-key": apiKey },
-      timeout,
+      timeout: 300_000,
     });
   }
 
@@ -135,6 +133,6 @@ export function createOpenAIClientFromRequest(config: UserApiKeyConfig) {
   return new OpenAI({
     apiKey,
     ...(baseURL ? { baseURL } : {}),
-    timeout,
+    timeout: 300_000,
   });
 }

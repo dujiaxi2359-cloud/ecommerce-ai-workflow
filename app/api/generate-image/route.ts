@@ -27,17 +27,6 @@ function parseHistoryMeta(value: FormDataEntryValue | null) {
   }
 }
 
-function safeEndpointLabel(baseURL?: string) {
-  if (!baseURL) return "official-or-provider-default";
-
-  try {
-    const url = new URL(baseURL);
-    return `${url.hostname}${url.pathname.replace(/\/+$/, "") || "/"}`;
-  } catch {
-    return "custom-base-url";
-  }
-}
-
 async function saveGeneratedHistory({
   meta,
   customerId,
@@ -100,16 +89,8 @@ export async function POST(request: Request) {
     const mode = String(formData.get("mode") || "text");
     const reference = formData.get("reference");
     const historyMeta = parseHistoryMeta(formData.get("__historyMeta"));
-    const authStartedAt = Date.now();
     const auth = await withWorkflowAuthFromFormData(formData, "text-image");
     if (isWorkflowAuthResponse(auth)) return auth;
-    addServerLog("info", "api.generate-image", "Workflow auth completed", {
-      durationMs: Date.now() - authStartedAt,
-      provider: auth.apiProvider || "openai",
-      hasBaseURL: Boolean(auth.baseURL),
-      endpoint: safeEndpointLabel(auth.baseURL || auth.azureEndpoint),
-      imageModel: auth.imageModel || auth.googleBananaModel || "default",
-    });
 
     addServerLog("info", "api.generate-image", "Received image generation request", {
       mode,
@@ -119,7 +100,6 @@ export async function POST(request: Request) {
       quality,
       count,
       hasReference: reference instanceof File && reference.size > 0,
-      promptLength: prompt.length,
     });
 
     if (!prompt) {
@@ -127,7 +107,6 @@ export async function POST(request: Request) {
     }
 
     const finalPrompt = buildTextPrompt({ prompt, style, ratio });
-    const generationStartedAt = Date.now();
     const result =
       mode === "reference" && reference instanceof File && reference.size > 0
         ? await generateImageWithReferences({
@@ -145,23 +124,14 @@ export async function POST(request: Request) {
             count,
             clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },
           });
-    addServerLog("success", "api.generate-image", "Image generation API call completed", {
-      durationMs: Date.now() - generationStartedAt,
-      images: result.images.length,
-    });
 
     const createdAt = new Date().toISOString();
-    const historyStartedAt = Date.now();
     const historyItem = await saveGeneratedHistory({
       meta: historyMeta,
       customerId: auth.license.code,
       finalPrompt: publicPrompt(),
       createdAt,
       images: result.images,
-    });
-    addServerLog("info", "api.generate-image", "History save completed", {
-      durationMs: Date.now() - historyStartedAt,
-      saved: Boolean(historyItem),
     });
 
     return NextResponse.json({
@@ -184,9 +154,6 @@ export async function POST(request: Request) {
       lower.includes("timed out") ||
       lower.includes("timeout")
     ) {
-      const isTimeout =
-        lower.includes("timed out") ||
-        lower.includes("timeout");
       const finalPrompt = prompt
         ? buildTextPrompt({ prompt, style, ratio })
         : "Local offline preview";
@@ -197,9 +164,7 @@ export async function POST(request: Request) {
         createdAt: new Date().toISOString(),
         durationMs: Date.now() - startedAt,
         warning:
-          isTimeout
-            ? "中转图片接口长时间未返回，已生成本地离线预览图。请检查中转节点、模型排队、质量档位和云端到中转的线路。"
-            : "当前网络无法连接图片服务，已生成本地离线预览图。配置可用网络、OPENAI_BASE_URL 或 Azure 终结点后会自动使用真实 AI 生图。",
+          "当前网络无法连接图片服务，已生成本地离线预览图。配置可用网络、OPENAI_BASE_URL 或 Azure 终结点后会自动使用真实 AI 生图。",
       });
     }
 

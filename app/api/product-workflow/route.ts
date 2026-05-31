@@ -12,21 +12,7 @@ import type { ImageQuality, ImageSize, Ratio } from "@/lib/workflow";
 
 export const runtime = "nodejs";
 
-const economyProductWorkflowSizeByRatio: Partial<Record<Ratio, ImageSize>> = {
-  "1:1": "1024x1024",
-  "3:4": "1024x1536",
-  "4:5": "1024x1536",
-  "9:16": "1024x1536",
-  "16:9": "1536x1024",
-  "1464:600": "1464x600",
-  "1464:625": "1464x625",
-  "600:450": "600x450",
-  "463:625": "463x625",
-  "1200:1500": "1024x1536",
-  "1600:1600": "1024x1024",
-};
-
-const premiumProductWorkflowSizeByRatio: Partial<Record<Ratio, ImageSize>> = {
+const productWorkflowSizeByRatio: Partial<Record<Ratio, ImageSize>> = {
   "1:1": "1600x1600",
   "3:4": "1200x1600",
   "4:5": "1200x1500",
@@ -40,15 +26,6 @@ const premiumProductWorkflowSizeByRatio: Partial<Record<Ratio, ImageSize>> = {
   "1600:1600": "1600x1600",
 };
 
-function productWorkflowSize(ratio: Ratio, quality: ImageQuality) {
-  const sizeMap =
-    quality === "low"
-      ? economyProductWorkflowSizeByRatio
-      : premiumProductWorkflowSizeByRatio;
-
-  return sizeMap[ratio] || ratioToSize[ratio];
-}
-
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -61,7 +38,7 @@ export async function POST(request: Request) {
     }
 
     const ratio = String(formData.get("ratio") || "1:1") as Ratio;
-    const quality = String(formData.get("quality") || "low") as ImageQuality;
+    const quality = String(formData.get("quality") || "high") as ImageQuality;
     const count = Math.min(Math.max(Number(formData.get("count") || 1), 1), 4);
     const protectionLevel = String(
       formData.get("protectionLevel") || "strict",
@@ -86,7 +63,7 @@ export async function POST(request: Request) {
     const result = await generateImageWithReferences({
       prompt,
       images: [product, ...auxImages],
-      size: productWorkflowSize(ratio, quality),
+      size: productWorkflowSizeByRatio[ratio] || ratioToSize[ratio],
       quality,
       count,
       clients: { openai: auth.openai, imageModel: auth.imageModel || auth.googleBananaModel },

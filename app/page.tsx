@@ -154,10 +154,6 @@ function isBananaProvider(provider: ApiProvider) {
   return provider === "banana";
 }
 
-function isAzureProvider(provider: ApiProvider) {
-  return provider === "azure" || provider === "azure-openai";
-}
-
 function ratioOptions() {
   return commercialRatioOptions;
 }
@@ -357,7 +353,7 @@ export default function Home() {
   const [productSpecs, setProductSpecs] = useState("");
   const [productPrompt, setProductPrompt] = useState("");
   const [productRatio, setProductRatio] = useState<Ratio>("1:1");
-  const [productQuality, setProductQuality] = useState<ImageQuality>("low");
+  const [productQuality, setProductQuality] = useState<ImageQuality>("high");
   const [productPlatform, setProductPlatform] =
     useState<EcommercePlatformId>("general");
   const [productProtectionLevel, setProductProtectionLevel] =
@@ -569,16 +565,9 @@ export default function Home() {
     }
     setUserApiKey(storedApiKey.apiKey);
     setUserBaseURL(storedApiKey.baseURL || "");
-    const storedProvider = storedApiKey.provider || "openai";
-    setApiProvider(storedProvider);
+    setApiProvider(storedApiKey.provider || "openai");
     setAzureEndpoint(storedApiKey.azureEndpoint || "");
-    setAzureDeployment(
-      isAzureProvider(storedProvider)
-        ? storedApiKey.azureDeployment || "gpt-image-2"
-        : isBananaProvider(storedProvider)
-          ? storedApiKey.googleBananaModel || "banana-pro"
-          : storedApiKey.imageModel || storedApiKey.azureDeployment || "",
-    );
+    setAzureDeployment(storedApiKey.azureDeployment || "gpt-image-2");
     setAzureApiVersion(storedApiKey.azureApiVersion || "2025-04-01-preview");
     return () => {
       cancelled = true;
@@ -674,21 +663,14 @@ export default function Home() {
   useFilePreview(posterLogo, setPosterLogoPreview, setPosterLogoThumb);
 
   function apiConfigPayload() {
-    const imageModel = "";
-    const googleBananaModel = isBananaProvider(apiProvider)
-      ? azureDeployment.trim()
-      : "";
-
     return {
       provider: apiProvider,
       apiProvider,
       apiKey: userApiKey,
       baseURL: userBaseURL,
       azureEndpoint,
-      azureDeployment: isAzureProvider(apiProvider) ? azureDeployment : "",
+      azureDeployment,
       azureApiVersion,
-      imageModel,
-      googleBananaModel,
     };
   }
 
@@ -700,8 +682,6 @@ export default function Home() {
     formData.append("azureEndpoint", config.azureEndpoint);
     formData.append("azureDeployment", config.azureDeployment);
     formData.append("azureApiVersion", config.azureApiVersion);
-    formData.append("imageModel", config.imageModel);
-    formData.append("googleBananaModel", config.googleBananaModel);
   }
 
   function isAzureEndpoint(value: string) {
@@ -779,7 +759,7 @@ export default function Home() {
     setUserApiKey("");
     setUserBaseURL("");
     setAzureEndpoint("");
-    setAzureDeployment("");
+    setAzureDeployment("gpt-image-2");
     setAzureApiVersion("2025-04-01-preview");
     setStatus("本机浏览器中的 API Key 已清除。");
   }
@@ -1302,41 +1282,13 @@ export default function Home() {
     }
   }
 
-  function blobFromDataUrl(url: string) {
-    const [header, base64 = ""] = url.split(",", 2);
-    const mimeType = header.match(/^data:([^;]+)/)?.[1] || "application/octet-stream";
-    const binary = window.atob(base64);
-    const chunks: ArrayBuffer[] = [];
-
-    for (let offset = 0; offset < binary.length; offset += 8192) {
-      const slice = binary.slice(offset, offset + 8192);
-      const bytes = new Uint8Array(slice.length);
-      for (let index = 0; index < slice.length; index += 1) {
-        bytes[index] = slice.charCodeAt(index);
-      }
-      chunks.push(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    }
-
-    return new Blob(chunks, { type: mimeType });
-  }
-
-  async function downloadImage(url: string, filename: string) {
-    const blob = url.startsWith("data:")
-      ? blobFromDataUrl(url)
-      : await fetch(url, { cache: "no-store" }).then((response) => {
-          if (!response.ok) {
-            throw new Error(`下载失败：HTTP ${response.status}`);
-          }
-          return response.blob();
-        });
-    const objectUrl = URL.createObjectURL(blob);
+  function downloadImage(url: string, filename: string) {
     const link = document.createElement("a");
-    link.href = objectUrl;
+    link.href = url;
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 8000);
   }
 
   function downloadAll() {
@@ -1353,25 +1305,28 @@ export default function Home() {
 
     try {
       let storedImages = (await getHistoryImages(item.id)) || [];
-      const activeLicenseCode = licenseStatus.valid
-        ? licenseStatus.code
-        : normalizeClientLicenseCode(licenseCode);
-      const historyQuery =
-        licenseStatus.valid && licenseStatus.planId === "studio"
-          ? `adminCode=${encodeURIComponent(activeLicenseCode)}`
-          : `licenseCode=${encodeURIComponent(activeLicenseCode)}`;
 
       if (!storedImages?.length) {
-        const imageCount = Math.max(item.imageCount || 1, 1);
-        await Promise.all(
-          Array.from({ length: imageCount }, (_, index) =>
-            downloadImage(
-              `/api/history/${item.id}?${historyQuery}&downloadIndex=${index}`,
-              `history-${item.workflow}-${item.id}-${index + 1}.png`,
-            ),
-          ),
-        );
-        return;
+        const activeLicenseCode = licenseStatus.valid
+          ? licenseStatus.code
+          : normalizeClientLicenseCode(licenseCode);
+        const historyQuery =
+          licenseStatus.valid && licenseStatus.planId === "studio"
+            ? `adminCode=${encodeURIComponent(activeLicenseCode)}`
+            : `licenseCode=${encodeURIComponent(activeLicenseCode)}`;
+        const response = await fetch(`/api/history/${item.id}?${historyQuery}`, {
+          cache: "no-store",
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.error || "共享历史图片读取失败。");
+        }
+
+        storedImages = payload.images || [];
+        if (storedImages.length) {
+          await saveHistoryImages(item.id, storedImages);
+        }
       }
 
       if (!storedImages.length) {
@@ -1384,14 +1339,16 @@ export default function Home() {
         return;
       }
 
-      await Promise.all(
-        storedImages.map((image, index) =>
-          downloadImage(
-            image.url,
-            `history-${item.workflow}-${item.id}-${index + 1}.png`,
-          ),
-        ),
-      );
+      storedImages.forEach((image, index) => {
+        window.setTimeout(
+          () =>
+            downloadImage(
+              image.url,
+              `history-${item.workflow}-${item.id}-${index + 1}.png`,
+            ),
+          index * 120,
+        );
+      });
     } catch (downloadError) {
       setError(
         downloadError instanceof Error
@@ -1504,7 +1461,7 @@ export default function Home() {
       </motion.div>
 
       <div className="relative z-10 flex h-full w-full">
-        <aside className="flex h-full w-[520px] shrink-0 flex-col border-r border-white/5 bg-black/40 p-8 backdrop-blur-3xl">
+        <aside className="flex h-full w-[420px] shrink-0 flex-col border-r border-white/5 bg-black/40 p-8 backdrop-blur-3xl">
           <div className="mb-10 flex items-center justify-between gap-4 border-b border-white/5 pb-8">
             <button className="text-left" onClick={() => setHasEnteredStudio(false)} aria-label="返回启动页">
               <AigcNongLogo variant="sidebar" />
@@ -1537,7 +1494,7 @@ export default function Home() {
               })}
             </div>
 
-          <div className="no-scrollbar flex-1 space-y-6 overflow-y-auto pb-8">
+          <div className="no-scrollbar flex-1 space-y-6 overflow-y-auto pb-20">
               {activeTab === "text" && (
                 <TextWorkflow
                   prompt={textPrompt}
@@ -1727,7 +1684,7 @@ export default function Home() {
               {status && <div className="studio-success">{status}</div>}
             </div>
 
-          <div className="studio-sidebar-action border-t border-white/[0.06] px-8 pb-10 pt-9">
+          <div className="studio-sidebar-action border-t border-white/[0.06] p-6">
             <button className="studio-primary-button w-full" onClick={runCurrentTab} disabled={isGenerating}>
               {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
               {activeTab === "detail" ? "执行详情图套图" : "执行生图蓝图"}
@@ -2056,7 +2013,7 @@ function CustomerApiAccessPanel({
                   setAzureDeployment("banana-pro");
                 }
                 if (provider.value === "openai" && bananaModelOptions.some((item) => item.value === azureDeployment)) {
-                  setAzureDeployment("");
+                  setAzureDeployment("gpt-image-2");
                 }
               }}
             >
@@ -2126,9 +2083,16 @@ function CustomerApiAccessPanel({
               onChange={(event) => setBaseURL(event.target.value)}
               placeholder="Base URL，例如 https://api.openai.com/v1 或兼容代理地址"
             />
-            <div className="rounded-2xl border border-white/[0.06] bg-black/25 px-4 py-3 text-xs leading-5 text-zinc-500">
-              OpenAI 兼容接口会沿用中转/服务器默认图片模型，不在前端覆盖 Image Model。旧版工作流也是这个逻辑。
-            </div>
+            <input
+              className="control"
+              placeholder="Text Model（可选，例如 gpt-4.1-mini）"
+            />
+            <input
+              className="control"
+              value={azureDeployment}
+              onChange={(event) => setAzureDeployment(event.target.value)}
+              placeholder="Image Model，例如 gpt-image-2"
+            />
           </div>
         )}
 
