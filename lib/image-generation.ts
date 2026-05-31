@@ -7,6 +7,7 @@ import {
   imageModel,
 } from "@/lib/openai";
 import { createId } from "@/lib/id";
+import { getImageApiTimeoutMs } from "@/lib/image-api-timeout";
 import { addServerLog } from "@/lib/server-logs";
 import type { ImageQuality, ImageSize } from "@/lib/workflow";
 
@@ -29,11 +30,11 @@ type ImageGenerationClients = {
 };
 
 function getDefaultOpenAIClient() {
-  return createOpenAIClient(300_000);
+  return createOpenAIClient();
 }
 
 function getDefaultAzureOpenAIClient() {
-  return hasAzureImageConfig() ? createAzureOpenAIClient(300_000) : null;
+  return hasAzureImageConfig() ? createAzureOpenAIClient() : null;
 }
 
 function sleep(ms: number) {
@@ -54,11 +55,20 @@ function isRateLimitError(error: unknown) {
   );
 }
 
+function isTimeoutError(error: unknown) {
+  const message = errorMessage(error).toLowerCase();
+  return message.includes("timed out") || message.includes("timeout") || message.includes("abort");
+}
+
 function normalizeImageError(error: unknown, provider: string, action: string) {
   const message = errorMessage(error);
 
   if (isRateLimitError(error)) {
     return `${provider} 图片服务当前繁忙或达到限流，请等待 30-60 秒后重试。建议先把输出数量设为 1，质量用 medium，连续生成时不要多人同时点击。原始错误：${message}`;
+  }
+
+  if (isTimeoutError(error)) {
+    return `${provider} 图片服务超过 ${Math.round(getImageApiTimeoutMs() / 1000)} 秒仍未返回，通常是中转接口排队、上游模型慢，或云端到中转线路不稳定。建议切换更快的中转节点/模型，或先用快速质量和单张测试。原始错误：${message}`;
   }
 
   return `${provider} image ${action} failed: ${message}`;
@@ -165,6 +175,7 @@ async function generateAzureImage({
     sizeNormalization: apiSize.reason,
     quality,
     count,
+    timeoutMs: getImageApiTimeoutMs(),
   });
 
   const result = await withImageApiRetry("azure.generate", () =>
@@ -209,6 +220,7 @@ async function generateOpenAIImage({
     sizeNormalization: apiSize.reason,
     quality,
     count,
+    timeoutMs: getImageApiTimeoutMs(),
   });
 
   const result = await withImageApiRetry("openai.generate", () =>
@@ -285,6 +297,7 @@ export async function generateImageWithReferences({
         quality,
         count,
         inputImages: images.length,
+        timeoutMs: getImageApiTimeoutMs(),
       });
 
       const inputFiles = await Promise.all(
@@ -337,6 +350,7 @@ export async function generateImageWithReferences({
     quality,
     count,
     inputImages: images.length,
+    timeoutMs: getImageApiTimeoutMs(),
   });
 
   const inputFiles = await Promise.all(

@@ -191,3 +191,41 @@ export async function getSharedHistoryImages(historyId: string) {
     }),
   );
 }
+
+export async function getSharedHistoryImageFile(historyId: string, imageIndex: number) {
+  const id = safeId(historyId);
+  if (!id) return null;
+
+  const itemDir = path.join(historyRoot, id);
+  const raw = await fs.readFile(path.join(itemDir, "images.json"), "utf8");
+  const parsed = JSON.parse(raw) as {
+    images: Array<{
+      id: string;
+      index: number;
+      file?: string;
+      mimeType?: string;
+      url?: string;
+    }>;
+  };
+  const record = (parsed.images || [])[imageIndex];
+
+  if (!record) return null;
+
+  if (record.file) {
+    const buffer = await fs.readFile(path.join(itemDir, record.file));
+    return {
+      buffer,
+      mimeType: record.mimeType || "image/png",
+      filename: record.file,
+    };
+  }
+
+  const parsedData = record.url ? parseDataImage(record.url) : null;
+  if (!parsedData) return null;
+
+  return {
+    buffer: parsedData.buffer,
+    mimeType: parsedData.mimeType,
+    filename: `${imageIndex + 1}.${parsedData.extension}`,
+  };
+}

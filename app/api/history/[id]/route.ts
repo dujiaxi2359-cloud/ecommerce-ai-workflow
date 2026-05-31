@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  getSharedHistoryImageFile,
   getSharedHistoryImages,
   listSharedHistory,
   normalizeHistoryCustomerId,
@@ -30,6 +31,7 @@ export async function GET(
       url.searchParams.get("adminCode") || request.headers.get("x-admin-code") || "";
     const licenseCode =
       url.searchParams.get("licenseCode") || request.headers.get("x-license-code") || "";
+    const downloadIndex = url.searchParams.get("downloadIndex");
 
     if (!isAdminHistoryCode(adminCode)) {
       const customerId = normalizeHistoryCustomerId(licenseCode);
@@ -39,6 +41,21 @@ export async function GET(
       if (!item || normalizeHistoryCustomerId(item.customerId) !== customerId) {
         return NextResponse.json({ error: "无权读取这条历史记录。" }, { status: 403 });
       }
+    }
+
+    if (downloadIndex !== null) {
+      const imageFile = await getSharedHistoryImageFile(id, Number(downloadIndex) || 0);
+      if (!imageFile) {
+        return NextResponse.json({ error: "历史图片文件不存在。" }, { status: 404 });
+      }
+
+      return new NextResponse(new Uint8Array(imageFile.buffer), {
+        headers: {
+          "Cache-Control": "private, max-age=31536000, immutable",
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(imageFile.filename)}"`,
+          "Content-Type": imageFile.mimeType,
+        },
+      });
     }
 
     return NextResponse.json({ images: await getSharedHistoryImages(id) });

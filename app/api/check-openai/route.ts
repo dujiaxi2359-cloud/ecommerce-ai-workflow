@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ApiProvider } from "@/lib/apiKey/apiKeyTypes";
 import { normalizeOpenAICompatibleBaseURL } from "@/lib/apiKey/openaiClientFromRequest";
+import { addServerLog } from "@/lib/server-logs";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,17 @@ function parseAzureEndpoint(endpoint?: string) {
   }
 }
 
+function safeEndpointLabel(baseURL?: string) {
+  if (!baseURL) return "official";
+
+  try {
+    const url = new URL(baseURL);
+    return `${url.hostname}${url.pathname.replace(/\/+$/, "") || "/"}`;
+  } catch {
+    return "custom-base-url";
+  }
+}
+
 export async function GET() {
   return NextResponse.json({
     ok: true,
@@ -49,6 +61,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const body = (await request.json().catch(() => ({}))) as {
     apiProvider?: ApiProvider;
     apiKey?: string;
@@ -84,12 +97,19 @@ export async function POST(request: Request) {
       );
     }
 
+    const durationMs = Date.now() - startedAt;
+    addServerLog("success", "api.check-openai", "Google Banana config validated", {
+      durationMs,
+      endpoint: safeEndpointLabel(baseURL),
+      model: body.googleBananaModel || body.imageModel || "banana-pro",
+    });
     return NextResponse.json({
       ok: true,
       type: "google-banana",
       message: `Google Banana 配置已保存：${body.googleBananaModel || body.imageModel || "banana-pro"}`,
       baseURL,
       model: body.googleBananaModel || body.imageModel || "banana-pro",
+      durationMs,
     });
   }
 
@@ -104,6 +124,13 @@ export async function POST(request: Request) {
         );
       }
 
+      const durationMs = Date.now() - startedAt;
+      addServerLog("success", "api.check-openai", "Azure config validated", {
+        durationMs,
+        endpoint: safeEndpointLabel(parsedAzure.endpoint),
+        deployment,
+        apiVersion: parsedAzure.apiVersion || body.azureApiVersion || "2025-04-01-preview",
+      });
       return NextResponse.json({
         ok: true,
         type: "azure",
@@ -111,16 +138,23 @@ export async function POST(request: Request) {
         endpoint: parsedAzure.endpoint,
         deployment,
         apiVersion: parsedAzure.apiVersion || body.azureApiVersion || "2025-04-01-preview",
+        durationMs,
       });
     }
 
     const compatibleBaseURL = normalizeOpenAICompatibleBaseURL(body.azureEndpoint || body.baseURL);
     if (compatibleBaseURL) {
+      const durationMs = Date.now() - startedAt;
+      addServerLog("success", "api.check-openai", "OpenAI-compatible Azure fallback config validated", {
+        durationMs,
+        endpoint: safeEndpointLabel(compatibleBaseURL),
+      });
       return NextResponse.json({
         ok: true,
         type: "openai-compatible",
         message: `已识别为 OpenAI 兼容接口，实际使用地址：${compatibleBaseURL}`,
         baseURL: compatibleBaseURL,
+        durationMs,
       });
     }
 
@@ -148,16 +182,30 @@ export async function POST(request: Request) {
     clearTimeout(timer);
 
     if (!response.ok) {
+      const durationMs = Date.now() - startedAt;
+      addServerLog("error", "api.check-openai", "Provider /models check failed", {
+        durationMs,
+        endpoint: safeEndpointLabel(baseURL),
+        status: response.status,
+        statusText: response.statusText,
+      });
       return NextResponse.json(
         {
           ok: false,
           error: classifyError(`${response.status} ${response.statusText}`),
           baseURL,
+          durationMs,
         },
         { status: response.status },
       );
     }
 
+    const durationMs = Date.now() - startedAt;
+    addServerLog("success", "api.check-openai", "Provider /models check completed", {
+      durationMs,
+      endpoint: safeEndpointLabel(baseURL),
+      model: body.imageModel || "default",
+    });
     return NextResponse.json({
       ok: true,
       type: "openai",
@@ -165,10 +213,17 @@ export async function POST(request: Request) {
         ? `OpenAI 兼容配置检测成功，实际使用地址：${baseURL}`
         : "OpenAI 官方接口检测成功：Base URL 留空时会使用 https://api.openai.com/v1。",
       baseURL,
+      durationMs,
     });
   } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    addServerLog("error", "api.check-openai", "Provider connectivity check failed", {
+      durationMs,
+      endpoint: safeEndpointLabel(baseURL),
+      error: classifyError(error),
+    });
     return NextResponse.json(
-      { ok: false, error: classifyError(error), baseURL },
+      { ok: false, error: classifyError(error), baseURL, durationMs },
       { status: 500 },
     );
   }
